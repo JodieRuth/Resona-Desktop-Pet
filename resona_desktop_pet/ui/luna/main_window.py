@@ -1,4 +1,5 @@
-import os
+﻿import os
+import sys
 import json
 import random
 import time
@@ -29,15 +30,10 @@ class MainWindow(QWidget):
         }
         self.input_hard_locked = False
         self.faded = False
+        self.manual_hidden = False
         self.fade_hover_recovery_sec = 0.0
         self.project_root = Path(self.config.config_path).parent
-        flags = Qt.WindowType.FramelessWindowHint
-        if not self.config.show_in_taskbar:
-            flags |= Qt.WindowType.Tool 
-        if self.config.always_on_top:
-            flags |= Qt.WindowType.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        
         self.setObjectName("MainRoot")
         self.character = CharacterView(self)
         self.io = IOOverlay(self)
@@ -48,6 +44,9 @@ class MainWindow(QWidget):
         layout.setSpacing(0)
         layout.addWidget(self.character, 0, Qt.AlignmentFlag.AlignCenter)
         self.setLayout(layout)
+
+        self._apply_window_settings()
+
         self.character.setup(self.project_root, self.config.default_outfit)
         self.character.set_emotion("<E:smile>", deterministic=True)
         self.sync_window_to_sprite()
@@ -343,6 +342,37 @@ class MainWindow(QWidget):
         self.keep_bottom_right_anchor(resize_task)
         self.update_io_geometry()
 
+    def _apply_window_settings(self):
+
+        was_visible = self.isVisible()
+        old_pos = self.pos() if was_visible else None
+        
+        flags = Qt.WindowType.FramelessWindowHint
+        if not self.config.show_in_taskbar:
+            flags |= Qt.WindowType.Tool 
+        if self.config.always_on_top:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+            
+        self.setWindowFlags(flags)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        
+
+        if was_visible or not self.manual_hidden:
+            self.show()
+
+            if was_visible and old_pos and old_pos.x() > -5000:
+                self.move(old_pos)
+            self.raise_()
+            
+            if self.config.always_on_top and sys.platform == "win32":
+                try:
+                    import ctypes
+                    hwnd = self.winId()
+                    if isinstance(hwnd, int): pass
+                    else: hwnd = int(hwnd)
+                    ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002)
+                except: pass
+
     def refresh_from_config(self):
         img_rect = self.character.image_rect()
         if img_rect.width() > 0 and img_rect.height() > 0:
@@ -353,11 +383,9 @@ class MainWindow(QWidget):
             new_scale = min(scale_w, scale_h)
             self.apply_scale(new_scale)
         self.io.set_names(self.config.username, self.config.character_name)
-        if self.config.always_on_top:
-            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        else:
-            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
-        self.show()
+        
+        self._apply_window_settings()
+        
         self.load_thinking_texts()
         self.load_listening_texts()
         self.update_io_geometry()
@@ -397,7 +425,7 @@ class MainWindow(QWidget):
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         now = time.time()
         
-        # Hard Lock: Ignore everything except internal events
+
         is_input_event = event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, 
                                           QEvent.MouseMove, QEvent.Wheel, QEvent.KeyPress, QEvent.KeyRelease)
         if self.input_hard_locked and is_input_event:
@@ -555,14 +583,8 @@ class MainWindow(QWidget):
     def manual_show(self):
         self.manual_hidden = False
         self.cancel_idle_fade()
-        current_flags = self.windowFlags()
-        if not (current_flags & Qt.WindowType.WindowStaysOnTopHint):
-            self.setWindowFlags(current_flags | Qt.WindowType.WindowStaysOnTopHint)
-            self.show()
-        self.raise_()
+        self._apply_window_settings()
         self.activateWindow()
-        if not self.config.always_on_top:
-            QTimer.singleShot(200, self._reset_stays_on_top)
 
     def _reset_stays_on_top(self):
         if not self.manual_hidden and not self.config.always_on_top:

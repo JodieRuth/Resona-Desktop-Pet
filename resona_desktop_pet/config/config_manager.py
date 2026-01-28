@@ -173,6 +173,10 @@ class ConfigManager:
         return self.getboolean("General", "ListeningText", True)
 
     @property
+    def debug_panel(self) -> bool:
+        return self.getboolean("General", "debug_panel", False)
+
+    @property
     def always_show_ui(self) -> bool:
         return self.getboolean("General", "always_show_ui", False)
 
@@ -238,7 +242,7 @@ class ConfigManager:
 
     @property
     def always_on_top(self) -> bool:
-        return self.getboolean("Behavior", "always_on_top", False)
+        return self.getboolean("General", "always_on_top", False)
 
     @property
     def behavior_text_read_multiplier(self) -> float:

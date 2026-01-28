@@ -145,6 +145,12 @@ class SettingsDialog(QDialog):
         self.username_edit = QLineEdit()
         char_layout.addRow("Your Name:", self.username_edit)
 
+        self.always_on_top_check = QCheckBox("Always on top")
+        char_layout.addRow(self.always_on_top_check)
+
+        self.always_show_ui_check = QCheckBox("Always show (no fade)")
+        char_layout.addRow(self.always_show_ui_check)
+
         icon_layout = QHBoxLayout()
         self.tray_icon_path_edit = QLineEdit()
         icon_layout.addWidget(self.tray_icon_path_edit)
@@ -360,6 +366,8 @@ class SettingsDialog(QDialog):
 
         self.character_name_edit.setText(self.config.character_name)
         self.username_edit.setText(self.config.username)
+        self.always_on_top_check.setChecked(self.config.always_on_top)
+        self.always_show_ui_check.setChecked(self.config.always_show_ui)
         self.thinking_enabled_check.setChecked(self.config.thinking_text_enabled)
         self.thinking_switch_check.setChecked(self.config.thinking_text_switch)
         self.thinking_time_spin.setValue(self.config.thinking_text_time)
@@ -427,6 +435,8 @@ class SettingsDialog(QDialog):
 
             self.config.set("General", "CharacterName", self.character_name_edit.text())
             self.config.set("Custom", "Username", self.username_edit.text())
+            self.config.set("General", "always_on_top", str(self.always_on_top_check.isChecked()).lower())
+            self.config.set("General", "always_show_ui", str(self.always_show_ui_check.isChecked()).lower())
             self.config.set("General", "ThinkingText", str(self.thinking_enabled_check.isChecked()).lower())
             self.config.set("General", "ThinkingTextSwitch", str(self.thinking_switch_check.isChecked()).lower())
             self.config.set("General", "ThinkingTextTime", str(self.thinking_time_spin.value()))

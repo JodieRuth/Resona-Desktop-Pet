@@ -278,10 +278,10 @@ class MainWindow(QWidget):
         self.load_thinking_texts()
         self.load_listening_texts()
     def _setup_window(self):
-        flags = (
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
+        flags = Qt.WindowType.FramelessWindowHint
+        if self.config.always_on_top:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        
         if self.config.show_in_taskbar:
             flags |= Qt.WindowType.Window
         else:

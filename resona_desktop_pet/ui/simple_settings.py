@@ -34,6 +34,7 @@ class SimpleSettingsDialog(QDialog):
         self._add_text("Custom", "Username", "User Name", "Your name displayed when talking.")
         self._add_bool("General", "use_pack_settings", "Use Pack Settings", "Override Name, User Name, Prompt and TTS Language with pack defaults.")
         self._add_bool("General", "always_show_ui", "Always Show UI", "If checked, UI will never fade out.")
+        self._add_bool("General", "always_on_top", "Always on Top", "If checked, the pet will stay above other windows.")
         self._add_text("General", "global_show_hotkey", "Show Hotkey", "Global hotkey to show/focus the pet (e.g. ctrl+alt+0).")
         
         self._add_section("Window & UI Size")

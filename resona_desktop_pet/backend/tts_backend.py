@@ -82,7 +82,7 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                 async with session.get(self.api_url) as response:
                     return response.status in [200, 404, 405]
         except: return False
-    async def synthesize(self, text: str, emotion: str = "<E:smile>", callback: Optional[Callable[[str], None]] = None) -> TTSResult:
+    async def synthesize(self, text: str, emotion: str = "<E:smile>", language: Optional[str] = None) -> TTSResult:
         if not self.config.sovits_enabled: return TTSResult(error="TTS is disabled")
         log(f"[TTS] Synthesizing: {text[:30]}... ({emotion})")
         if not await self.load_model():
@@ -92,14 +92,15 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
             emotion_config = self._get_emotion_config(emotion)
             if not emotion_config: return TTSResult(error="Emotion config missing")
             ref_wav_path = self._resolve_ref_audio_path(emotion_config["ref_wav"])
-            ref_lang = self.config.tts_language
-            log(f"[TTS] Using reference audio: {ref_wav_path} with language: {ref_lang}")
+            ref_lang = language if language else self.config.tts_language
+            prompt_lang = emotion_config.get("ref_lang", "ja")
+            log(f"[TTS] Using reference audio: {ref_wav_path} with language: {ref_lang} (Prompt: {prompt_lang})")
             output_path = os.path.join(self._temp_dir, f"output_{hash(text) & 0xffffffff}.wav")
             payload = {
                 "text": text, "text_lang": ref_lang,
                 "ref_audio_path": str(ref_wav_path.absolute()),
                 "prompt_text": emotion_config.get("ref_text", ""),
-                "prompt_lang": ref_lang,
+                "prompt_lang": prompt_lang,
                 "top_k": int(self.config.sovits_top_k), "top_p": float(self.config.sovits_top_p),
                 "temperature": float(self.config.sovits_temperature), "speed_factor": float(self.config.sovits_speed),
                 "media_type": "wav", "streaming_mode": False,

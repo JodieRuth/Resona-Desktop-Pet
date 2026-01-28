@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import subprocess
 import time
@@ -10,7 +10,6 @@ from typing import Optional
 import signal
 import psutil
 from ..cleanup_manager import register_cleanup, register_pid
-
 
 class SoVITSManager:
     def __init__(self, project_root: Path, port: int = 9880, device: str = "cuda", model_version: str = "v2"):
@@ -45,6 +44,18 @@ class SoVITSManager:
                 self._kill_process_on_port(self.port)
                 time.sleep(2)
             else: return True
+        
+        if sys.platform == "win32":
+            try:
+                runtime_dir = self.gpt_sovits_dir / "runtime"
+                sp_dir = runtime_dir / "Lib" / "site-packages"
+                if not sp_dir.exists(): sp_dir = runtime_dir / "lib" / "site-packages"
+                if sp_dir.exists():
+                    pth_path = sp_dir / "resona_dist_fix.pth"
+                    fix_code = "import os; p = os.path.join(sitedir, 'torch', 'lib'); os.add_dll_directory(p) if os.path.exists(p) else None\n"
+                    with open(pth_path, "w", encoding="utf-8") as f: f.write(fix_code)
+            except: pass
+
         if not self.api_script.exists(): return False
         if not self.config_file.exists(): return False
         actual_config_file = self.config_file
@@ -55,7 +66,28 @@ class SoVITSManager:
             cfg.read(self.project_root / "config.cfg", encoding="utf-8")
             pack_id = cfg.get("General", "active_pack", fallback="Resona_Default")
         except: pass
-        pack_model_dir = self.project_root / "packs" / pack_id / "models" / "sovits"
+        
+        pack_dir = self.project_root / "packs" / pack_id
+        if not pack_dir.exists():
+            found = False
+            for subdir in (self.project_root / "packs").iterdir():
+                if subdir.is_dir():
+                    pack_json = subdir / "pack.json"
+                    if pack_json.exists():
+                        try:
+                            import json
+                            with open(pack_json, "r", encoding="utf-8") as f:
+                                data = json.load(f)
+                                info = data.get("pack_info", {})
+                                if info.get("id") == pack_id or data.get("id") == pack_id:
+                                    pack_dir = subdir
+                                    found = True
+                                    break
+                        except: pass
+            if not found:
+                print(f"[SoVITS] Warning: Pack ID '{pack_id}' not found in any directory.")
+                
+        pack_model_dir = pack_dir / "models" / "sovits"
         if self.device == "cuda":
             try:
                 override_path = self.project_root / "TEMP" / f"tts_infer_override_{pack_id}.yaml"
@@ -76,19 +108,18 @@ class SoVITSManager:
                     pth_files = list(model_dir.glob("*.pth"))
                 if ckpt_files and pth_files:
                     ckpt_file, pth_file = sorted(ckpt_files)[0], sorted(pth_files)[0]
-                    try:
-                        rel_ckpt = os.path.relpath(ckpt_file, self.gpt_sovits_dir).replace("\\", "/")
-                        rel_pth = os.path.relpath(pth_file, self.gpt_sovits_dir).replace("\\", "/")
-                        content = re.sub(r't2s_weights_path:.*', f't2s_weights_path: {rel_ckpt}', content)
-                        content = re.sub(r'vits_weights_path:.*', f'vits_weights_path: {rel_pth}', content)
-                        content = re.sub(r'version:.*', f'version: {self.model_version}', content)
-                    except ValueError: pass
+                    abs_ckpt = ckpt_file.absolute().as_posix()
+                    abs_pth = pth_file.absolute().as_posix()
+                    content = re.sub(r't2s_weights_path:.*', f't2s_weights_path: "{abs_ckpt}"', content)
+                    content = re.sub(r'vits_weights_path:.*', f'vits_weights_path: "{abs_pth}"', content)
+                    content = re.sub(r'version:.*', f'version: {self.model_version}', content)
                 with open(override_path, "w", encoding="utf-8") as f: f.write(content)
                 actual_config_file = override_path
             except Exception: pass
         python_exec = sys.executable
         embedded_python = self.gpt_sovits_dir / "runtime" / "python.exe"
         if sys.platform == "win32" and embedded_python.exists(): python_exec = str(embedded_python)
+        
         cmd = [python_exec, self.rel_api_script, "-a", "127.0.0.1", "-p", str(self.port), "-c", str(Path(actual_config_file).absolute())]
         try:
             if sys.platform == "win32":

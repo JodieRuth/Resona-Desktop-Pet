@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-import sys
+﻿import sys
 import os
 from pathlib import Path
 project_root = Path(__file__).parent.absolute()
@@ -59,7 +58,7 @@ class TeeLogger:
         self.log_file.flush()
 sys.stdout = TeeLogger(log_file, sys.stdout)
 sys.stderr = sys.stdout
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s', handlers=[logging.StreamHandler(sys.stdout)])
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s', handlers=[logging.StreamHandler(sys.stdout)], force=True)
 def log(message):
     logging.info(message)
 class AudioPlayer(QObject):
@@ -153,6 +152,20 @@ class ApplicationController(QObject):
         self.audio_player.playback_finished.connect(self._on_audio_finished)
         self.main_window = MainWindow(self.config)
         self.main_window.controller = self 
+        
+        self.tray_icon = TrayIcon(self.main_window)
+        self.tray_icon.show()
+        
+        self.debug_panel = None
+        if self.config.debug_panel:
+            try:
+                from resona_desktop_pet.ui.debug_panel import DebugPanel
+                self.debug_panel = DebugPanel(self.config.pack_manager, self.config)
+                self.debug_panel.request_manual_response.connect(self.handle_manual_debug_response)
+                QTimer.singleShot(1000, lambda: self._add_debug_to_tray())
+            except Exception as e:
+                log(f"[Main] Failed to initialize DebugPanel: {e}")
+
         self.main_window.stats["total_clicks"] = self.state.get("total_clicks", 0)
         self.behavior_monitor = BehaviorMonitor(self.config, self)
         self.behavior_monitor.fullscreen_status_changed.connect(self._handle_fullscreen_status)
@@ -197,6 +210,25 @@ class ApplicationController(QObject):
             log("[Main] Initializing STT hotkey and loading model...")
             self.stt_backend.register_hotkey(lambda: self.request_stt_start.emit())
             asyncio.run_coroutine_threadsafe(self._async_init_stt(), self._loop)
+
+    def _add_debug_to_tray(self):
+        try:
+            from resona_desktop_pet.ui.tray_icon import TrayIcon
+            if hasattr(self, 'tray_icon'):
+                self.tray_icon.add_menu_action("Dev Control Panel", self.debug_panel.show)
+        except Exception as e:
+            log(f"[Main] Tray integration for debug panel failed: {e}")
+
+    def handle_manual_debug_response(self, data):
+        response = data["response"]
+        setattr(response, 'tts_lang', data.get("tts_lang", "ja"))
+        
+        log(f"[DebugPanel] Manual response received: {response.emotion} | {response.text_display}")
+        
+        self.main_window.start_thinking()
+        
+        QTimer.singleShot(1500, lambda: self.llm_response_ready.emit(response))
+
     async def _async_init_stt(self):
         success = await self.stt_backend.load_model()
         if success:
@@ -227,7 +259,8 @@ class ApplicationController(QObject):
             return
         self._current_text = response.text_display
         self._current_emotion = response.emotion
-        self._trigger_voice_response(response.text_display, response.emotion, None, tts_text=response.text_tts)
+        tts_lang_for_trigger = getattr(response, 'tts_lang', None)
+        self._trigger_voice_response(response.text_display, response.emotion, None, tts_text=response.text_tts, tts_lang=tts_lang_for_trigger)
     def _handle_tts_ready(self, result):
         log(f"[Main] TTS synthesized ready. Success={not result.error}")
         self.main_window.show_response(self._current_text, self._current_emotion)
@@ -243,7 +276,7 @@ class ApplicationController(QObject):
         self.main_window.set_speaking(False)
         self.main_window.on_audio_complete()
         self._busy_watchdog.stop()
-    def _trigger_voice_response(self, text, emotion, voice_file=None, is_behavior=False, tts_text=None):
+    def _trigger_voice_response(self, text, emotion, voice_file=None, is_behavior=False, tts_text=None, tts_lang=None):
         v_path = None
         if voice_file:
             pack_audio_path = self.config.pack_manager.get_path("audio", "event_dir")
@@ -256,12 +289,15 @@ class ApplicationController(QObject):
         elif self.config.sovits_enabled and not is_behavior:
             log("[Main] Handing over to SoVITS synthesis chain.")
             self.main_window.set_speaking(True)
-            asyncio.run_coroutine_threadsafe(self._generate_tts(tts_text or text, emotion), self._loop)
+            asyncio.run_coroutine_threadsafe(self._generate_tts(tts_text or text, emotion, language=tts_lang), self._loop)
         else:
             log("[Main] No audio source available, showing text response with timeout.")
             self.main_window.show_behavior_response_with_timeout(text, emotion)
-    async def _generate_tts(self, text: str, emotion: str):
-        result = await self.tts_backend.synthesize(text, emotion)
+    async def _generate_tts(self, text: str, emotion: str, language: Optional[str] = None):
+        if not language and self.config.use_pack_settings:
+            language = self.config.pack_manager.get_info("tts_language", "ja")
+        
+        result = await self.tts_backend.synthesize(text, emotion, language=language)
         self.tts_ready.emit(result)
     def _handle_behavior_trigger(self, actions: list):
         if not actions or self.main_window.manual_hidden: return

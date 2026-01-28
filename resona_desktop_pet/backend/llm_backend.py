@@ -1,4 +1,4 @@
-import json
+﻿import json
 import re
 from datetime import datetime
 from typing import Optional, Callable, Any, List
@@ -10,7 +10,6 @@ from ..config import ConfigManager
 
 @dataclass
 class LLMResponse:
-    """Structured response from LLM."""
     emotion: str = "<E:smile>"
     text_display: str = ""
     text_tts: str = ""
@@ -21,46 +20,37 @@ class LLMResponse:
 
 @dataclass
 class ConversationHistory:
-    """Manages conversation history in standard message format."""
     max_rounds: int = 14
     history: list = field(default_factory=list)
 
     def add(self, role: str, content: str) -> None:
-        """Add a message to history."""
         self.history.append({"role": role, "content": content})
-        # Keep only max_rounds * 2 (user + assistant)
         limit = self.max_rounds * 2
         if len(self.history) > limit:
             self.history = self.history[-limit:]
 
     def get_messages(self) -> list:
-        """Get the history as a list of messages."""
         return self.history
 
     def clear(self) -> None:
-        """Clear all history."""
         self.history.clear()
 
 
 class LLMBackend:
-    """LLM Backend supporting persistent cloud clients and dedicated logging."""
 
     def __init__(self, config: ConfigManager, log_path: Optional[Path] = None):
         self.config = config
         self.log_path = log_path
         self.history = ConversationHistory(max_rounds=config.max_rounds)
         
-        # Persistent clients
         self._openai_client = None
         self._claude_client = None
         self._gemini_safety = {}
         self._active_model_name = None
         
-        # Initial connect
         self.reconnect()
 
     def reconnect(self):
-        """Pre-initialize LLM clients based on current config."""
         llm_cfg = self.config.get_llm_config()
         model_type = llm_cfg["model_type"]
         model_name = llm_cfg["model_name"]
@@ -71,7 +61,6 @@ class LLMBackend:
 
         try:
             if model_type == 5:
-                # Import Google Generative AI only if needed
                 import google.generativeai as genai
                 from google.generativeai.types import HarmCategory, HarmBlockThreshold
                 
@@ -97,7 +86,6 @@ class LLMBackend:
             print(f"[LLM] Failed to pre-initialize client: {e}")
 
     def _get_precise_time_context(self) -> str:
-        """Get detailed current time information."""
         now = datetime.now()
         weekday_map = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
         time_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -116,10 +104,8 @@ class LLMBackend:
         return f"当前本地时间: {time_str} ({weekday}, {period})"
 
     def _build_messages(self, question: str, provider: str = "default") -> list:
-        """Build message list for LLM API with provider-specific history cleaning."""
         messages = []
 
-        # 1. System prompt (Core rules + Time Context)
         system_prompt = self.config.get_prompt()
         
         if self.config.enable_time_context:
@@ -131,11 +117,9 @@ class LLMBackend:
         )
         messages.append({"role": "system", "content": system_prompt + context_instruction})
 
-        # 2. History
         raw_history = self.history.get_messages()
         for msg in raw_history:
             content = msg["content"]
-            # SPECIAL CLEANING: Remove JSON structure from assistant messages to avoid model confusion
             if msg["role"] == "assistant":
                 try:
                     if content.strip().startswith("{"):
@@ -145,23 +129,19 @@ class LLMBackend:
                     pass 
             messages.append({"role": msg["role"], "content": content})
 
-        # 3. Current Question
         messages.append({"role": "user", "content": question})
         return messages
 
     def _parse_response(self, text: str) -> LLMResponse:
-        """Parse LLM response JSON with robust extraction."""
         response = LLMResponse(raw_response=text)
         print(f"[LLM] Raw response from API: {text[:200]}...")
 
-        # Clean markdown code blocks
         json_str = text.strip()
         if "```" in json_str:
             match = re.search(r"```(?:json)?\s*(.*?)\s*```", json_str, re.DOTALL)
             if match:
                 json_str = match.group(1).strip()
         
-        # If still not JSON, try finding first curly brace
         if not json_str.startswith("{"):
             match = re.search(r"({.*})", json_str, re.DOTALL)
             if match:
@@ -179,7 +159,6 @@ class LLMBackend:
             return response
 
     def _log_interaction(self, request_data: Any, response_raw: str):
-        """Write interaction to dedicated LLM log file and standard logger."""
         import logging
         llm_logger = logging.getLogger("LLM")
         
@@ -192,7 +171,6 @@ class LLMBackend:
                 f.write(f"[REQUEST]\n{json.dumps(request_data, ensure_ascii=False, indent=2)}\n")
                 f.write(f"[RESPONSE RAW]\n{response_raw}\n")
             
-            # Summary to structured logger (llm.log via main.py setup)
             llm_logger.info(f"Interaction logged to {self.log_path.name}")
         except Exception as e:
             print(f"[LLM] Logging error: {e}")
@@ -205,7 +183,6 @@ class LLMBackend:
         top_p: float = 1.0,
         max_tokens: int = 500
     ) -> LLMResponse:
-        """Query OpenAI/DeepSeek compatible API."""
         try:
             if not self._openai_client: self.reconnect()
             messages = self._build_messages(question)
@@ -223,7 +200,6 @@ class LLMBackend:
             raw_text = message.content or ""
             reasoning = getattr(message, "reasoning_content", "")
             
-            # Handle R1 style thinking tags in content
             for tag in ["think", "thinking"]:
                 if f"<{tag}>" in raw_text:
                     pattern = rf"<{tag}>(.*?)</{tag}>"
@@ -251,7 +227,6 @@ class LLMBackend:
         top_p: float = 1.0,
         max_tokens: int = 500
     ) -> LLMResponse:
-        """Query Google Gemini with specialized context mapping."""
         try:
             import google.generativeai as genai
             messages = self._build_messages(question, provider="gemini")
@@ -266,21 +241,18 @@ class LLMBackend:
             model = genai.GenerativeModel(
                 model_name=self._active_model_name,
                 safety_settings=self._gemini_safety,
+                system_instruction=system_instruction,
                 generation_config={"temperature": temperature, "top_p": top_p, "max_output_tokens": max_tokens}
             )
             
-            current_query = chat_history.pop()["parts"][0]
             chat = model.start_chat(history=chat_history)
-            # Prepend instruction to first message if history was empty
-            if system_instruction and not chat_history:
-                current_query = f"System Instruction: {system_instruction}\n\nUser Question: {current_query}"
+            current_query = messages[-1]["content"]
 
             response = await chat.send_message_async(current_query)
             if not response.candidates: return LLMResponse(error="Empty response")
             
             raw_text = response.text
             thought_text = ""
-            # Extract thinking tags if present
             for tag in ["think", "thinking"]:
                 pattern = rf"<{tag}>(.*?)</{tag}>"
                 match = re.search(pattern, raw_text, re.DOTALL)
@@ -303,7 +275,6 @@ class LLMBackend:
         temperature: float = 0.7,
         max_tokens: int = 500
     ) -> LLMResponse:
-        """Query Anthropic Claude."""
         try:
             if not self._claude_client: self.reconnect()
             messages = self._build_messages(question, provider="claude")
@@ -332,7 +303,6 @@ class LLMBackend:
             return LLMResponse(error=str(e))
 
     async def query(self, question: str) -> LLMResponse:
-        """Consolidated LLM query entry point."""
         llm_config = self.config.get_llm_config()
         model_type = llm_config["model_type"]
         model_name = llm_config["model_name"]
@@ -373,5 +343,4 @@ class LLMBackend:
         return response
 
     def clear_history(self) -> None:
-        """Clear conversation history."""
         self.history.clear()
