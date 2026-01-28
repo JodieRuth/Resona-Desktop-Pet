@@ -221,6 +221,12 @@ class BehaviorMonitor(QThread):
             if hasattr(psutil, "sensors_temperatures"):
                 t = psutil.sensors_temperatures()
                 if 'coretemp' in t: stats["cpu_temp"] = t['coretemp'][0].current
+        except: pass
+
+        if not getattr(self.controller, "can_monitor_gpu", True):
+            return stats
+
+        try:
             import pynvml
             pynvml.nvmlInit()
             h = pynvml.nvmlDeviceGetHandleByIndex(0)

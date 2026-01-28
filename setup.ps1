@@ -171,18 +171,6 @@ if ($doDownloadPack) {
         Write-Host '[Resona] Extracting Assets Pack...'
         Expand-Archive -Path 'pack.zip' -DestinationPath 'packs' -Force
         Remove-Item 'pack.zip'
-
-        if (Test-Path 'config.cfg') {
-            Write-Host '[Resona] Adapting config.cfg...'
-            $cfgText = Get-Content 'config.cfg' -Raw
-            $cfgText = $cfgText -replace 'active_pack\s*=\s*.*', 'active_pack = Resona_Default'
-            $cfgText = $cfgText -replace 'charactername\s*=\s*.*', 'charactername = Resona Okura'
-            $cfgText = $cfgText -replace 'default_outfit\s*=\s*.*', 'default_outfit = risona_outfit_00'
-            $cfgText = $cfgText -replace 'file_path\s*=\s*.*', 'file_path = prompt_yuusei.txt'
-            
-            $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-            [System.IO.File]::WriteAllText((Resolve-Path 'config.cfg'), $cfgText, $Utf8NoBom)
-        }
     } else {
         Write-Error "[Resona] Assets Pack Download failed."
     }

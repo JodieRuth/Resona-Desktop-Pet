@@ -99,6 +99,30 @@ class ApplicationController(QObject):
             log("[Debug] CRITICAL: Pack data is empty! Check pack.json path and ID.")
         self.project_root = Path(self.config.config_path).parent
         self._cleanup_temp_dir()
+
+
+
+        self.gpu_vendor = "Unknown"
+        self.can_monitor_gpu = True
+        try:
+            import subprocess
+            raw_out = subprocess.check_output("wmic path win32_VideoController get name", shell=True, stderr=subprocess.STDOUT)
+            try:
+                output = raw_out.decode("utf-8")
+            except UnicodeDecodeError:
+                output = raw_out.decode("gbk", errors="ignore")
+            
+            output_up = output.upper()
+            if "AMD" in output_up or "RADEON" in output_up:
+                self.gpu_vendor = "AMD"
+                self.can_monitor_gpu = False
+                log("[Main] AMD GPU detected. Disabling GPU monitoring features to prevent crashes.")
+            elif "NVIDIA" in output_up:
+                self.gpu_vendor = "NVIDIA"
+                log("[Main] NVIDIA GPU detected. GPU monitoring enabled.")
+        except Exception as e:
+            log(f"[Main] GPU detection skipped or failed: {e}")
+
         self._stt_ready = False
         self._last_llm_response = None
         self._trigger_cooldown_end = 0
