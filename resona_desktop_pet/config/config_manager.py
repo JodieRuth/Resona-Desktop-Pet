@@ -8,7 +8,7 @@ from .pack_manager import PackManager
 
 class ConfigManager:
     def __init__(self, config_path: str = "config.cfg"):
-        self.config_path = Path(config_path)
+        self.config_path = Path(config_path).absolute()
         self.config = configparser.ConfigParser(interpolation=None)
         self.load()
 
@@ -177,6 +177,10 @@ class ConfigManager:
         return self.getboolean("General", "debug_panel", False)
 
     @property
+    def debug_trigger(self) -> bool:
+        return self.getboolean("General", "debugtrigger", False)
+
+    @property
     def always_show_ui(self) -> bool:
         return self.getboolean("General", "always_show_ui", False)
 
@@ -322,6 +326,10 @@ class ConfigManager:
     @property
     def stt_download_url(self) -> str:
         return self.get("STT", "download_url", "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2")
+
+    @property
+    def stt_language(self) -> str:
+        return self.get("STT", "language", "auto")
 
 
     @property

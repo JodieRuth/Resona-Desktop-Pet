@@ -337,6 +337,10 @@ class SettingsDialog(QDialog):
         self.stt_hotkey_edit = QLineEdit()
         stt_layout.addRow("Hotkey:", self.stt_hotkey_edit)
 
+        self.stt_language_combo = QComboBox()
+        self.stt_language_combo.addItems(["auto", "zh", "en", "ja", "ko", "yue"])
+        stt_layout.addRow("Fixed Language:", self.stt_language_combo)
+
         self.stt_silence_spin = QDoubleSpinBox()
         self.stt_silence_spin.setRange(0.5, 5.0)
         self.stt_silence_spin.setSingleStep(0.1)
@@ -393,6 +397,7 @@ class SettingsDialog(QDialog):
 
         self.stt_enabled_check.setChecked(self.config.stt_enabled)
         self.stt_hotkey_edit.setText(self.config.stt_hotkey)
+        self.stt_language_combo.setCurrentText(self.config.stt_language)
         self.stt_silence_spin.setValue(self.config.stt_silence_threshold)
         self.stt_max_duration_spin.setValue(self.config.stt_max_duration)
         self.stt_model_dir_edit.setText(self.config.stt_model_dir)
@@ -462,6 +467,7 @@ class SettingsDialog(QDialog):
 
             self.config.set("STT", "enabled", "1" if self.stt_enabled_check.isChecked() else "0")
             self.config.set("STT", "hotkey", self.stt_hotkey_edit.text())
+            self.config.set("STT", "language", self.stt_language_combo.currentText())
             self.config.set("STT", "silence_threshold", str(self.stt_silence_spin.value()))
             self.config.set("STT", "max_duration", str(self.stt_max_duration_spin.value()))
             self.config.set("STT", "model_dir", self.stt_model_dir_edit.text())

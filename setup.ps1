@@ -10,6 +10,18 @@ $PACK_URL = 'https://huggingface.co/datasets/JodieRuth/test1/resolve/main/Resona
 # Distribution & Conversion by k2-fsa/sherpa-onnx (Apache-2.0)
 $STT_URL = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2'
 
+# --- GPU Detection ---
+$gpus = Get-CimInstance Win32_VideoController
+$isNvidia50 = $false
+foreach ($gpu in $gpus) {
+    if ($gpu.Name -like "*RTX 50*") {
+        $isNvidia50 = $true
+        $SOVITS_URL = 'https://huggingface.co/datasets/JodieRuth/test123/resolve/main/GPT-SoVITS-v2pro-20250604-nvidia50.zip'
+        Write-Host "[Resona] Detected NVIDIA 50-series GPU: $($gpu.Name). Using optimized SoVITS version." -ForegroundColor Green
+        break
+    }
+}
+
 $DISCLAIMER = @'
 *******************************************************************************
 *                                DISCLAIMER                                   *
@@ -149,6 +161,12 @@ if ($doDownloadSovits) {
         Write-Host '[Resona] Extracting SoVITS (this may take a while)...'
         Expand-Archive -Path 'sovits.zip' -DestinationPath 'GPT-SoVITS' -Force
         Remove-Item 'sovits.zip'
+        
+        # Handle 50-series folder renaming
+        if (Test-Path 'GPT-SoVITS\GPT-SoVITS-v2pro-20250604-nvidia50') {
+            Write-Host '[Resona] Renaming optimized SoVITS folder...'
+            Rename-Item -Path 'GPT-SoVITS\GPT-SoVITS-v2pro-20250604-nvidia50' -NewName 'GPT-SoVITS-v2pro-20250604'
+        }
     } else {
         Write-Error "[Resona] SoVITS Download failed."
     }

@@ -33,6 +33,7 @@ class BehaviorMonitor(QThread):
         self.is_first_run = True
         self.last_clip_text = self._get_clipboard()
         self.last_music_title = "" 
+        self._last_mock_data = {}
         self.load_triggers()
     def load_triggers(self):
         trigger_path = self.config.pack_manager.get_path("logic", "triggers")
@@ -56,17 +57,44 @@ class BehaviorMonitor(QThread):
             time.sleep(self.config.behavior_interval)
     def _perform_checks(self, is_startup=False):
         now = time.time()
-        if self.config.getboolean("General", "debugtrigger", fallback=False):
+        if self.config.debug_trigger:
             mock_path = self.project_root / "TEMP" / "mock_data.json"
             if mock_path.exists():
                 try:
                     with open(mock_path, "r", encoding="utf-8") as f:
                         m = json.load(f)
+                    
+                    if m == self._last_mock_data:
+                        return
+
+                    is_fs = m.get("is_fullscreen", False)
+                    if is_fs != self.is_fullscreen:
+                        self.is_fullscreen = is_fs
+                        self.fullscreen_status_changed.emit(is_fs)
+
+                    current_pids = {}
+                    for p in psutil.process_iter(['name', 'pid', 'create_time']):
+                        try:
+                            pid = p.info['pid']; pn = p.info['name'].lower()
+                            current_pids[pid] = pn
+                            if pid not in self.pid_history:
+                                self.pid_history[pid] = {"name": pn, "start_time": p.info['create_time']}
+                        except: continue
+                    self.active_processes = set(current_pids.values())
+
+                    clip_text = m.get("clip_text", "")
+                    clip_changed_text = clip_text if clip_text != self._last_mock_data.get("clip_text") else ""
+                    
+                    curr_music = m.get("music_title", "")
+                    music_changed_text = curr_music if curr_music != self._last_mock_data.get("music_title") else ""
+
+                    self._last_mock_data = m.copy()
+
                     hw_stats = {"cpu_temp": m.get("cpu_temp"), "gpu_temp": m.get("gpu_temp"), "cpu_usage": m.get("cpu_usage"), "gpu_usage": m.get("gpu_usage")}
                     win_info = WindowInfo(0, 0, m.get("win_title"), m.get("win_pname"), (0,0,0,0), m.get("win_url"))
-                    clip_text = m.get("clip_text", "")
-                    music_title = m.get("music_title", "")
-                    self._process_rule_matching(now, win_info, float(m.get("idle_sec", 0)), hw_stats, clip_text, m.get("weather", {}), is_startup, m.get("date"), m.get("time"), music_title=music_title)
+                    
+                    self._process_rule_matching(now, win_info, float(m.get("idle_sec", 0)), hw_stats, clip_text, m.get("weather", {}), is_startup, m.get("date"), m.get("time"), 
+                                              clip_changed=clip_changed_text, music_title=curr_music, music_changed=music_changed_text)
                     self.last_clip_text = clip_text
                     return 
                 except: pass
@@ -102,7 +130,7 @@ class BehaviorMonitor(QThread):
         except Exception as e:
             logging.error(f"[Behavior] Check failed: {e}")
     def _process_rule_matching(self, now, win, idle, hw, clip, weather, is_startup, m_date=None, m_time=None, clip_changed="", music_title="", music_changed=""):
-        is_debug = self.config.getboolean("General", "debugtrigger", fallback=False)
+        is_debug = self.config.debug_trigger
         is_recovering = (idle < 1.0 and self.last_cycle_idle > 1.0)
         recovery_duration = self.last_cycle_idle if is_recovering else 0.0
         for rule in self.triggers:
@@ -153,17 +181,24 @@ class BehaviorMonitor(QThread):
         elif t == "gpu_usage": res = hw["gpu_usage"] > c.get("gt", 0)
         elif t in ["process_active", "process_background"]:
             wl = [p.lower() for p in c.get("pnames", [c.get("pname", "")]) if p]
-            targets = [win.pid] if (t == "process_active" and win and win.process_name in wl) else []
-            if t == "process_background":
+            in_mock = m_date is not None
+            if t == "process_active":
+                targets = [win.pid] if (win and win.process_name in wl) else []
+            else:
                 targets = [pid for pid, info in self.pid_history.items() if info["name"] in wl]
-            if c.get("only_new") and not m_date:
+                if in_mock and win and win.process_name in wl:
+                    if win.pid not in targets:
+                        targets.append(win.pid)
+            if c.get("only_new") and not in_mock:
                 targets = [p for p in targets if self.pid_history[p]["start_time"] > self.app_start_time]
             if targets: res, pids = True, targets
         elif t == "clip_match":
-            target_text = clip_changed if not m_date else clip 
+            in_mock = m_date is not None
+            target_text = clip_changed if not in_mock else clip 
             res = any(kw.lower() in target_text.lower() for kw in c.get("keywords", [])) if target_text else False
         elif t == "music_match":
-            target_text = music_changed if c.get("only_on_change", True) and not m_date else music_title
+            in_mock = m_date is not None
+            target_text = music_changed if (c.get("only_on_change", True) and not in_mock) else music_title
             res = any(kw.lower() in target_text.lower() for kw in c.get("keywords", [])) if target_text else False
         elif t == "url_match": res = any(kw.lower() in (win.url or "").lower() for kw in c.get("keywords", [])) if win else False
         elif t == "title_match": res = any(kw.lower() in win.title.lower() for kw in c.get("keywords", [])) if win else False

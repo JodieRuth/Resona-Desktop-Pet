@@ -3,6 +3,7 @@ import sys
 import json
 import random
 import time
+import ctypes
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, Signal, QEvent, QPoint, QRect, QPropertyAnimation, QEasingCurve, QObject
 from PySide6.QtGui import QMouseEvent, QWheelEvent, QPixmap, QCursor, QGuiApplication, QAction, QActionGroup, QIcon
@@ -19,6 +20,11 @@ class MainWindow(QWidget):
     def __init__(self, config: ConfigManager, parent: QWidget = None):
         super().__init__(parent)
         self.config = config
+        
+        self.topmost_timer = QTimer(self)
+        self.topmost_timer.setInterval(2500)
+        self.topmost_timer.timeout.connect(self._reinforce_topmost)
+        
         self.stats = {
             "hover_start_time": 0.0,
             "press_start_time": 0.0,
@@ -31,6 +37,11 @@ class MainWindow(QWidget):
         self.input_hard_locked = False
         self.faded = False
         self.manual_hidden = False
+        self.fullscreen_hidden = False
+        self.is_processing = False
+        self.is_listening = False
+        self.is_speaking = False
+        self.is_displaying_text = False
         self.fade_hover_recovery_sec = 0.0
         self.project_root = Path(self.config.config_path).parent
         
@@ -84,12 +95,6 @@ class MainWindow(QWidget):
         self.dragging_started = False
         self.drag_offset = QPoint()
         self.drag_mod = Qt.KeyboardModifier.NoModifier 
-        self.is_processing = False
-        self.is_listening = False
-        self.is_speaking = False
-        self.is_displaying_text = False
-        self.manual_hidden = False
-        self.fullscreen_hidden = False
         self.thinking_texts = []
         self.load_thinking_texts()
         self.listening_texts = []
@@ -105,6 +110,7 @@ class MainWindow(QWidget):
         self.io.submitted.connect(self.on_query_submitted)
         self.io.text_changed.connect(self.on_input_text_changed)
         self.character.rightClicked.connect(self.show_context_menu)
+        
         QTimer.singleShot(0, self.sync_window_to_sprite)
         self.dialogue = self.DialogueAdapter(self)
         self.sprite = self.SpriteAdapter(self)
@@ -325,6 +331,7 @@ class MainWindow(QWidget):
             self.setFixedSize(self.character.sizeHint())
         self.keep_bottom_right_anchor(do_resize)
         self.update_io_geometry()
+        self._reinforce_topmost()
         
     def keep_bottom_right_anchor(self, do_resize_func):
         br = self.frameGeometry().bottomRight()
@@ -341,6 +348,19 @@ class MainWindow(QWidget):
             self.setFixedSize(self.character.sizeHint())
         self.keep_bottom_right_anchor(resize_task)
         self.update_io_geometry()
+        self._reinforce_topmost()
+
+    def _reinforce_topmost(self):
+        if self.manual_hidden or self.fullscreen_hidden or not self.isVisible():
+            return
+        if self.config.always_on_top and sys.platform == "win32":
+            try:
+                hwnd = self.winId()
+                if not isinstance(hwnd, int):
+                    hwnd = int(hwnd)
+                ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+            except:
+                pass
 
     def _apply_window_settings(self):
 
@@ -364,14 +384,12 @@ class MainWindow(QWidget):
                 self.move(old_pos)
             self.raise_()
             
-            if self.config.always_on_top and sys.platform == "win32":
-                try:
-                    import ctypes
-                    hwnd = self.winId()
-                    if isinstance(hwnd, int): pass
-                    else: hwnd = int(hwnd)
-                    ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002)
-                except: pass
+            if self.config.always_on_top:
+                self._reinforce_topmost()
+                if not self.topmost_timer.isActive():
+                    self.topmost_timer.start()
+            else:
+                self.topmost_timer.stop()
 
     def refresh_from_config(self):
         img_rect = self.character.image_rect()
@@ -600,6 +618,7 @@ class MainWindow(QWidget):
         else:
             super().show()
             self.sync_window_to_sprite()
+            self._reinforce_topmost()
 
     def safe_set_outfit(self, outfit: str):
         try:
@@ -696,6 +715,7 @@ class MainWindow(QWidget):
         screen = QGuiApplication.primaryScreen().availableGeometry()
         self.move(screen.bottomRight() - QPoint(self.width() + 24, self.height() + 24))
         self.sync_window_to_sprite()
+        self._reinforce_topmost()
 
     def closeEvent(self, event):
         QApplication.instance().quit()

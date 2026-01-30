@@ -83,6 +83,14 @@ class SimpleSettingsDialog(QDialog):
         self._add_section("STT (Voice Input)")
         self._add_bool("STT", "enabled", "Enable STT", "Enable voice input.")
         self._add_text("STT", "hotkey", "Hotkey", "Key combination to start/stop recording (e.g. ctrl+shift+i).")
+        self._add_combo("STT", "language", "Fixed Language", [
+            ("auto", "Auto Detect"),
+            ("zh", "Chinese"),
+            ("en", "English"),
+            ("ja", "Japanese"),
+            ("ko", "Korean"),
+            ("yue", "Cantonese")
+        ], "Explicitly fix the STT recognition language.")
         self._add_text("STT", "max_duration", "Max Duration (s)", "Max recording time per turn.")
 
         self._add_section("Weather")

@@ -31,8 +31,10 @@ class STTBackend:
         self._record_thread: Optional[threading.Thread] = None
         self._silence_counter = 0
         self._hotkey_registered = False
+        self._loaded_language = None
         register_cleanup(self.cleanup)
         log("STTBackend initialized (Model not loaded yet)")
+
     def _get_model_path(self) -> Path:
         model_dir = self.project_root / self.config.stt_model_dir
         if model_dir.exists():
@@ -43,6 +45,7 @@ class STTBackend:
             if item.is_dir() and "sense" in item.name.lower():
                 return item
         return model_dir
+
     def _download_model(self, url: str, target_dir: Path) -> Optional[Path]:
         if not url: return None
         log(f"Downloading STT model from {url}")
@@ -61,8 +64,15 @@ class STTBackend:
             log(f"Download failed: {e}")
             if target_path.exists(): target_path.unlink()
             return None
+
     async def load_model(self) -> bool:
-        if self._model_loaded: return True
+        current_lang = self.config.stt_language
+        if current_lang.lower() == "auto":
+            current_lang = ""
+
+        if self._model_loaded and self._loaded_language == current_lang:
+            return True
+
         if not self.config.stt_enabled: 
             log("STT is disabled in config")
             return False
@@ -101,22 +111,26 @@ class STTBackend:
             if not model_file or not tokens_file: 
                 log(f"CRITICAL: Missing files in {model_dir}. Need .onnx and tokens.txt")
                 return False
-            log(f"Loading SenseVoice model: {model_file.name}")
+            log(f"Loading SenseVoice model: {model_file.name} (Lang: {current_lang or 'auto'})")
             self._recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
                 model=str(model_file.absolute()), 
                 tokens=str(tokens_file.absolute()), 
                 num_threads=4, 
                 use_itn=True, 
-                debug=False
+                debug=False,
+                language=current_lang
             )
             self._model_loaded = True
+            self._loaded_language = current_lang
             log("SenseVoice model loaded successfully.")
             return True
         except Exception as e: 
             log(f"Failed to initialize sherpa-onnx: {e}")
             return False
+
     async def _extract_model(self, archive_path: Path, target_dir: Path) -> None:
         await asyncio.get_event_loop().run_in_executor(None, self._extract_sync, archive_path, target_dir)
+
     def _extract_sync(self, archive_path: Path, target_dir: Path) -> None:
         try:
             log(f"Extracting {archive_path} to {target_dir}...")
@@ -124,6 +138,7 @@ class STTBackend:
             log("Extraction complete.")
         except Exception as e:
             log(f"Extraction failed: {e}")
+
     def register_hotkey(self, callback: Callable[[], None]) -> bool:
         if self._hotkey_registered: return True
         try:
@@ -136,6 +151,7 @@ class STTBackend:
         except Exception as e:
             log(f"Failed to register STT hotkey: {e}")
             return False
+
     def unregister_hotkey(self) -> None:
         if not self._hotkey_registered: return
         try:
@@ -143,9 +159,15 @@ class STTBackend:
             keyboard.unhook_all()
             self._hotkey_registered = False
         except Exception: pass
+
     async def start_recording(self, on_complete: Optional[Callable[[STTResult], None]] = None) -> None:
         if self._is_recording: return
-        if not self._model_loaded:
+        
+        current_lang = self.config.stt_language
+        if current_lang.lower() == "auto":
+            current_lang = ""
+            
+        if not self._model_loaded or self._loaded_language != current_lang:
             if not await self.load_model():
                 if on_complete: on_complete(STTResult(error="Model not loaded"))
                 return
@@ -153,6 +175,7 @@ class STTBackend:
         self._audio_data, self._silence_counter = [], 0
         self._record_thread = threading.Thread(target=self._record_audio, args=(on_complete,), daemon=True)
         self._record_thread.start()
+
     def _record_audio(self, on_complete: Optional[Callable[[STTResult], None]]) -> None:
         try:
             import pyaudio
@@ -190,16 +213,30 @@ class STTBackend:
             log(f"Recording error: {e}")
             self._is_recording = False
             if on_complete: on_complete(STTResult(error=str(e)))
+
     def _recognize_audio(self) -> STTResult:
         if not self._recognizer or not self._audio_data: return STTResult(error="No audio")
         try:
             import numpy as np
-            audio_float = np.frombuffer(b"".join(self._audio_data), dtype=np.int16).astype(np.float32) / 32768.0
+            audio_data_bytes = b"".join(self._audio_data)
+            audio_float = np.frombuffer(audio_data_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            
+            if len(audio_float) == 0:
+                return STTResult(error="Audio buffer empty")
+
+            max_vol = np.max(np.abs(audio_float))
+            log(f"Recognizing audio: {len(audio_float)/self._sample_rate:.2f}s, Max Vol: {max_vol:.4f}")
+
             stream = self._recognizer.create_stream()
             stream.accept_waveform(self._sample_rate, audio_float)
             self._recognizer.decode_stream(stream)
-            return STTResult(text=stream.result.text.strip(), duration=len(audio_float) / self._sample_rate)
-        except Exception as e: return STTResult(error=str(e))
+            
+            text = stream.result.text.strip()
+            return STTResult(text=text, duration=len(audio_float) / self._sample_rate)
+        except Exception as e:
+            log(f"Recognition error: {e}")
+            return STTResult(error=str(e))
+
     def stop_recording(self) -> None: self._is_recording = False
     def is_recording(self) -> bool: return self._is_recording
     def cleanup(self) -> None: self.stop_recording(); self.unregister_hotkey()

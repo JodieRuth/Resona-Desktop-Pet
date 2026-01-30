@@ -172,10 +172,11 @@ class ApplicationController(QObject):
         self.behavior_monitor.trigger_matched.connect(self._handle_behavior_trigger)
         self.behavior_monitor.start()
         self._mocker_process = None
-        if self.config.getboolean("General", "debugtrigger", fallback=False):
+        if self.config.debug_trigger:
             import subprocess
-            log("[Debug] debugtrigger is ENABLED. Starting sensor mocker...")
-            self._mocker_process = subprocess.Popen([sys.executable, str(self.project_root / "tools" / "sensor_mocker.py")])
+            mocker_script = self.project_root / "tools" / "sensor_mocker.py"
+            log(f"[Debug] debugtrigger is ENABLED. Starting sensor mocker: {mocker_script}")
+            self._mocker_process = subprocess.Popen([sys.executable, str(mocker_script)], cwd=str(self.project_root))
         self.main_window.pack_changed.connect(self._handle_pack_change)
         self.main_window.request_query.connect(self._handle_user_query)
         self.main_window.replay_requested.connect(self._replay_last_response)
@@ -304,8 +305,12 @@ class ApplicationController(QObject):
         if self.interaction_locked: return
         if self.main_window.is_processing or self.main_window.is_listening:
             return
+        
+        if self.is_busy:
+            return
+
         now = time.time()
-        is_debug = self.config.getboolean("General", "debugtrigger", fallback=False)
+        is_debug = self.config.debug_trigger
         if is_debug:
             self._execute_actions_chain(actions)
             return
@@ -329,14 +334,21 @@ class ApplicationController(QObject):
         self._is_chain_executing = True 
         self._current_sequence = actions
         self._current_sequence_idx = 0
+        
+        self._current_chain_callback = None
+        
         def execute_next():
             if self._current_sequence_idx >= len(self._current_sequence):
-                try: self.audio_player.playback_finished.disconnect(execute_next)
-                except: pass
+                if self._current_chain_callback:
+                    try: self.audio_player.playback_finished.disconnect(self._current_chain_callback)
+                    except: pass
+                self._current_chain_callback = None
                 self._is_chain_executing = False
                 return
+
             action = self._current_sequence[self._current_sequence_idx]
             self._current_sequence_idx += 1
+
             if action.get("type") == "random_group":
                 branches = action.get("branches", [])
                 if branches:
@@ -345,17 +357,20 @@ class ApplicationController(QObject):
                     self._current_sequence_idx = 0
                 execute_next()
                 return
+
             if action.get("type") == "delay":
                 QTimer.singleShot(int(action.get("sec", 1.0) * 1000), execute_next)
                 return
+
             if action.get("type") == "speak":
-                try: self.audio_player.playback_finished.disconnect(execute_next)
-                except: pass
                 self.audio_player.playback_finished.connect(execute_next)
                 self._trigger_voice_response(action.get("text", ""), action.get("emotion", "<E:smile>"), action.get("voice_file"), is_behavior=True)
                 return
+
             self._execute_single_action(action)
             execute_next()
+
+        self._current_chain_callback = execute_next
         execute_next()
     def _unlock_interaction(self):
         self.interaction_locked = False
@@ -433,6 +448,8 @@ class ApplicationController(QObject):
         self.main_window.set_listening(True, username=self.config.username)
         asyncio.run_coroutine_threadsafe(self.stt_backend.start_recording(on_complete=lambda r: self.stt_result_ready.emit(r)), self._loop)
     def _handle_stt_result(self, result):
+        if result.error:
+            log(f"[STT] Error: {result.error}")
         log(f"[STT] Result: '{result.text}'")
         self.main_window.set_listening(False)
         self.main_window.set_input_locked(False)
@@ -519,7 +536,7 @@ def is_admin():
     try: return ctypes.windll.shell32.IsUserAnAdmin()
     except: return False
 def run_as_admin():
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), str(project_root), 1)
 def main():
     config = ConfigManager()
     needs_admin = False

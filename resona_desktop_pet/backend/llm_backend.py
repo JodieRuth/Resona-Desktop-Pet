@@ -24,6 +24,9 @@ class ConversationHistory:
     history: list = field(default_factory=list)
 
     def add(self, role: str, content: str) -> None:
+        if self.max_rounds <= 0:
+            self.history = []
+            return
         self.history.append({"role": role, "content": content})
         limit = self.max_rounds * 2
         if len(self.history) > limit:
@@ -101,35 +104,24 @@ class LLMBackend:
         elif 19 <= hour < 23: period = "晚上"
         else: period = "深夜"
         
-        return f"当前本地时间: {time_str} ({weekday}, {period})"
+        return f"{time_str} ({weekday}, {period})"
 
-    def _build_messages(self, question: str, provider: str = "default") -> list:
+    def _build_messages(self, question: str) -> list:
         messages = []
-
         system_prompt = self.config.get_prompt()
         
+        messages.append({"role": "system", "content": system_prompt})
+
+        processed_question = question
         if self.config.enable_time_context:
             time_info = self._get_precise_time_context()
-            system_prompt += f"\n\n[Context Info]\n{time_info}"
-        
-        context_instruction = (
-            "\n2. 你拥有完整的对话上下文记忆，请结合历史记录进行连贯的回答。"
-        )
-        messages.append({"role": "system", "content": system_prompt + context_instruction})
+            processed_question = f"[Local Time: {time_info}]\n{question}"
 
         raw_history = self.history.get_messages()
         for msg in raw_history:
-            content = msg["content"]
-            if msg["role"] == "assistant":
-                try:
-                    if content.strip().startswith("{"):
-                        data = json.loads(content)
-                        content = data.get("text_display", content)
-                except:
-                    pass 
-            messages.append({"role": msg["role"], "content": content})
+            messages.append({"role": msg["role"], "content": msg["content"]})
 
-        messages.append({"role": "user", "content": question})
+        messages.append({"role": "user", "content": processed_question})
         return messages
 
     def _parse_response(self, text: str) -> LLMResponse:
@@ -177,7 +169,7 @@ class LLMBackend:
 
     async def query_openai_compatible(
         self,
-        question: str,
+        messages: list,
         model_name: str,
         temperature: float = 0.7,
         top_p: float = 1.0,
@@ -185,7 +177,6 @@ class LLMBackend:
     ) -> LLMResponse:
         try:
             if not self._openai_client: self.reconnect()
-            messages = self._build_messages(question)
             self._log_interaction(messages, "WAITING...")
             
             response = await self._openai_client.chat.completions.create(
@@ -222,33 +213,36 @@ class LLMBackend:
 
     async def query_gemini(
         self,
-        question: str,
+        messages: list,
         temperature: float = 0.7,
         top_p: float = 1.0,
         max_tokens: int = 500
     ) -> LLMResponse:
         try:
             import google.generativeai as genai
-            messages = self._build_messages(question, provider="gemini")
             
-            chat_history = []
+            gemini_msgs = []
             system_instruction = ""
+            
             for msg in messages:
-                if msg["role"] == "system": system_instruction = msg["content"]
-                elif msg["role"] == "user": chat_history.append({"role": "user", "parts": [msg["content"]]})
-                elif msg["role"] == "assistant": chat_history.append({"role": "model", "parts": [msg["content"]]})
+                if msg["role"] == "system":
+                    system_instruction = msg["content"]
+                elif msg["role"] == "user":
+                    gemini_msgs.append({"role": "user", "parts": [msg["content"]]})
+                elif msg["role"] == "assistant":
+                    gemini_msgs.append({"role": "model", "parts": [msg["content"]]})
 
             model = genai.GenerativeModel(
                 model_name=self._active_model_name,
                 safety_settings=self._gemini_safety,
-                system_instruction=system_instruction,
+                system_instruction=system_instruction
+            )
+            
+            response = await model.generate_content_async(
+                gemini_msgs,
                 generation_config={"temperature": temperature, "top_p": top_p, "max_output_tokens": max_tokens}
             )
             
-            chat = model.start_chat(history=chat_history)
-            current_query = messages[-1]["content"]
-
-            response = await chat.send_message_async(current_query)
             if not response.candidates: return LLMResponse(error="Empty response")
             
             raw_text = response.text
@@ -270,14 +264,13 @@ class LLMBackend:
 
     async def query_claude(
         self,
-        question: str,
+        messages: list,
         model_name: str,
         temperature: float = 0.7,
         max_tokens: int = 500
     ) -> LLMResponse:
         try:
             if not self._claude_client: self.reconnect()
-            messages = self._build_messages(question, provider="claude")
             
             system_prompt = next((m["content"] for m in messages if m["role"] == "system"), "")
             filtered_messages = [m for m in messages if m["role"] != "system"]
@@ -311,23 +304,26 @@ class LLMBackend:
             self.reconnect()
 
         try:
+            messages = self._build_messages(question)
+            processed_question = messages[-1]["content"]
+
             if model_type == "local" or model_type in [1, 2, 4, 6]:
                 response = await self.query_openai_compatible(
-                    question, model_name,
+                    messages, model_name,
                     temperature=llm_config.get("temperature", 0.7),
                     top_p=llm_config.get("top_p", 1.0),
                     max_tokens=llm_config.get("max_tokens", 500)
                 )
             elif model_type == 5:
                 response = await self.query_gemini(
-                    question,
+                    messages,
                     temperature=llm_config.get("temperature", 0.7),
                     top_p=llm_config.get("top_p", 1.0),
                     max_tokens=llm_config.get("max_tokens", 500)
                 )
             elif model_type == 3:
                 response = await self.query_claude(
-                    question, model_name,
+                    messages, model_name,
                     temperature=llm_config.get("temperature", 0.7),
                     max_tokens=llm_config.get("max_tokens", 500)
                 )
@@ -337,7 +333,7 @@ class LLMBackend:
             response = LLMResponse(error=f"Request Failed: {e}")
 
         if not response.error and response.text_display:
-            self.history.add("user", question)
+            self.history.add("user", processed_question)
             self.history.add("assistant", response.raw_response)
 
         return response
