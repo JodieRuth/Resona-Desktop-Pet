@@ -33,6 +33,9 @@ TRANSLATIONS = {
     "music_match": {"label": "音乐匹配(网易云)", "fields": ["keywords", "only_on_change"]},
     "date_match": {"label": "日期匹配(MM-DD)", "fields": ["date"]},
     "time_range": {"label": "时间段(HH:MM-HH:MM)", "fields": ["range"]},
+    "process_uptime": {"label": "进程存活时间(s)", "fields": ["pname", "gt", "lt", "log"]},
+    "battery_level": {"label": "电池电量(%)", "fields": ["gt", "lt", "charging", "log"]},
+    "file_drop": {"label": "文件拖入检测", "fields": ["exts", "name_keywords", "log"]},
     "speak": {"label": "语音台词", "fields": ["text", "emotion", "voice_file"]},
     "delay": {"label": "延迟等待", "fields": ["sec"]},
     "move_to": {"label": "移动位置", "fields": ["pos"]},
@@ -63,6 +66,10 @@ TRANSLATIONS = {
     "match_text": "匹配文本(可选)",
     "gt_value": "数值大于(可选)",
     "lt_value": "数值小于(可选)",
+    "lt": "小于数值(可选)",
+    "log": "触发时打印日志(可选)",
+    "exts": "允许的文件后缀列表",
+    "name_keywords": "文件名包含的关键词",
     "params": "插件参数列表"
 }
 
@@ -134,6 +141,8 @@ class TriggerEditor(QMainWindow):
         self.max_spin.valueChanged.connect(lambda v: self._update_base_val("max_triggers", v))
         self.enabled_cb = QCheckBox("启用此触发器")
         self.enabled_cb.toggled.connect(lambda b: self._update_base_val("enabled", b))
+        self.startup_cb = QCheckBox("仅启动时触发一次")
+        self.startup_cb.toggled.connect(lambda b: self._update_base_val("startup_only", b))
         f1.addRow("ID:", self.id_edit)
         f1.addRow("规则描述:", self.desc_edit)
         f1.addRow("判定逻辑:", self.logic_box)
@@ -260,7 +269,6 @@ class TriggerEditor(QMainWindow):
         if path.exists():
             with open(path, "r", encoding="utf-8") as f: self.current_triggers = json.load(f)
         else:
-            # 如果文件不存在，创建默认结构
             path.parent.mkdir(parents=True, exist_ok=True)
             self.current_triggers = []
             with open(path, "w", encoding="utf-8") as f:
@@ -271,7 +279,6 @@ class TriggerEditor(QMainWindow):
     def save_data(self):
         if not self.active_pack_id: return
         path = self.project_root / "packs" / self.active_pack_id / "logic" / "triggers.json"
-        # 确保目录存在
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.current_triggers, f, indent=4, ensure_ascii=False)
@@ -286,7 +293,6 @@ class TriggerEditor(QMainWindow):
         print(f"正在尝试保存到: {path}")
         print(f"当前触发器数据: {self.current_triggers}")
         try:
-            # 确保目录存在
             path.parent.mkdir(parents=True, exist_ok=True)
             print(f"目录已确保存在: {path.parent}")
             with open(path, "w", encoding="utf-8") as f:
@@ -321,7 +327,6 @@ class TriggerEditor(QMainWindow):
         self._render_acts(data.get("actions", []), self.act_tree.invisibleRootItem())
         self.act_tree.expandAll()
 
-        # 清除编辑引用
         self.editing_item_ref = None
         self.editing_tree_item_ref = None
         self._editing_is_action = None
@@ -343,13 +348,13 @@ class TriggerEditor(QMainWindow):
             "actions": []
         })
         self.refresh_list()
-        self.auto_save()  # 自动保存
+        self.auto_save()  
 
     def delete_trigger(self):
         if self.selected_index >= 0:
             del self.current_triggers[self.selected_index]
             self.refresh_list()
-            self.auto_save()  # 自动保存
+            self.auto_save()  
 
     def _render_recursive_conds(self, conds, parent):
         for c in conds:
@@ -401,8 +406,6 @@ class TriggerEditor(QMainWindow):
             w = self.prop_form.takeAt(0).widget()
             if w: w.deleteLater()
 
-        # 为确保修改能正确保存，我们需要记录当前编辑项的位置信息
-        # 通过在树项中存储索引信息来追踪数据位置
         self.editing_item_ref = data
         self.editing_tree_item_ref = tree_item
         self._editing_is_action = is_action
@@ -452,26 +455,18 @@ class TriggerEditor(QMainWindow):
         else:
             fields = def_source.get("fields", []) if isinstance(def_source, dict) else []
 
-        # 为树项添加额外的用户数据，存储索引信息
-        # 获取当前项在父项中的索引
         parent_item = tree_item.parent()
         if parent_item:
-            # 子项索引
             index_in_parent = parent_item.indexOfChild(tree_item)
-            # 获取父项的用户数据以确定它是条件组还是动作组
             parent_data = parent_item.data(0, Qt.ItemDataRole.UserRole)
-            # 设置当前项的用户数据，包含索引信息
             tree_item.setData(1, Qt.ItemDataRole.UserRole, {"index": index_in_parent, "parent_data": parent_data, "is_action": is_action})
         else:
-            # 根级项，直接存储索引
             root = tree_item.treeWidget().invisibleRootItem()
             index_in_parent = root.indexOfChild(tree_item)
             tree_item.setData(1, Qt.ItemDataRole.UserRole, {"index": index_in_parent, "parent_data": None, "is_action": is_action})
 
-        # 创建一个辅助函数来更新主数据结构
         def update_main_data_structure_by_indices(key, value):
             print(f"通过索引更新主数据结构: key={key}, value={value}")
-            # 获取树项中存储的索引信息
             index_info = tree_item.data(1, Qt.ItemDataRole.UserRole)
             if not index_info:
                 print("错误: 无法获取索引信息")
@@ -483,33 +478,26 @@ class TriggerEditor(QMainWindow):
 
             print(f"索引信息: index={index}, parent_data={parent_data}, is_action={is_action}")
 
-            # 如果有父数据，说明这是子项（嵌套条件）
             if parent_data:
-                # 检查父数据是否在当前触发器中
                 for trig_idx, trigger in enumerate(self.current_triggers):
-                    # 检查父数据是否在条件列表中（作为逻辑组）
                     if "conditions" in trigger:
                         for cond_idx, condition in enumerate(trigger["conditions"]):
                             if condition is parent_data:
-                                # 这是一个逻辑组，更新其子条件
                                 if "conditions" in condition and index < len(condition["conditions"]):
                                     condition["conditions"][index][key] = value
                                     print(f"更新嵌套条件[{trig_idx}][{cond_idx}][{index}]的{key}为{value}")
                                     self.auto_save()
                                     return
             else:
-                # 这是根级条件或动作
                 if self.selected_index >= 0 and self.selected_index < len(self.current_triggers):
                     trigger = self.current_triggers[self.selected_index]
                     if is_action:
-                        # 更新动作
                         if "actions" in trigger and index < len(trigger["actions"]):
                             trigger["actions"][index][key] = value
                             print(f"更新动作[{self.selected_index}][{index}]的{key}为{value}")
                             self.auto_save()
                             return
                     else:
-                        # 更新条件
                         if "conditions" in trigger and index < len(trigger["conditions"]):
                             trigger["conditions"][index][key] = value
                             print(f"更新条件[{self.selected_index}][{index}]的{key}为{value}")
@@ -518,7 +506,6 @@ class TriggerEditor(QMainWindow):
 
             print("警告: 未能根据索引找到要更新的数据")
 
-        # 为每个字段创建控件，并绑定到正确的数据更新函数
         for key in fields:
             val = data.get(key)
             if key in ["only_new", "only_on_change"]:
@@ -535,7 +522,7 @@ class TriggerEditor(QMainWindow):
 
                 def update_emotion(txt, k=key):
                     update_main_data_structure_by_indices(k, txt)
-                    data[k] = txt  # 同时更新本地引用
+                    data[k] = txt  
                     tree_item.setText(1, str(data))
 
                 combo.currentTextChanged.connect(update_emotion)
@@ -547,7 +534,7 @@ class TriggerEditor(QMainWindow):
 
                 def update_plugin_id(txt, k=key):
                     update_main_data_structure_by_indices(k, txt)
-                    data[k] = txt  # 同时更新本地引用
+                    data[k] = txt  
                     tree_item.setText(1, str(data))
 
                 combo.currentTextChanged.connect(update_plugin_id)
@@ -557,7 +544,7 @@ class TriggerEditor(QMainWindow):
 
                 def update_bool(v, k=key):
                     update_main_data_structure_by_indices(k, v)
-                    data[k] = v  # 同时更新本地引用
+                    data[k] = v  
                     tree_item.setText(1, str(data))
 
                 cb.toggled.connect(update_bool)
@@ -567,7 +554,7 @@ class TriggerEditor(QMainWindow):
 
                 def update_voice_file(txt, k=key):
                     update_main_data_structure_by_indices(k, txt)
-                    data[k] = txt  # 同时更新本地引用
+                    data[k] = txt  
                     tree_item.setText(1, str(data))
 
                 edit.textChanged.connect(update_voice_file)
@@ -578,7 +565,7 @@ class TriggerEditor(QMainWindow):
                 def update_list(txt, k=key):
                     parsed_list = [s.strip() for s in txt.split(",") if s.strip()]
                     update_main_data_structure_by_indices(k, parsed_list)
-                    data[k] = parsed_list  # 同时更新本地引用
+                    data[k] = parsed_list  
                     tree_item.setText(1, str(data))
 
                 edit.textChanged.connect(update_list)
@@ -589,7 +576,7 @@ class TriggerEditor(QMainWindow):
 
                 def update_number(v, k=key):
                     update_main_data_structure_by_indices(k, v)
-                    data[k] = v  # 同时更新本地引用
+                    data[k] = v  
                     tree_item.setText(1, str(data))
 
                 spin.valueChanged.connect(update_number)
@@ -599,7 +586,7 @@ class TriggerEditor(QMainWindow):
 
                 def update_text(txt, k=key):
                     update_main_data_structure_by_indices(k, txt)
-                    data[k] = txt  # 同时更新本地引用
+                    data[k] = txt  
                     tree_item.setText(1, str(data))
 
                 edit.textChanged.connect(update_text)
@@ -612,7 +599,7 @@ class TriggerEditor(QMainWindow):
             self.current_triggers[self.selected_index][key] = val
             print(f"更新后触发器[{self.selected_index}]: {self.current_triggers[self.selected_index]}")
             if key == "id": self.refresh_list()
-            self.auto_save()  # 自动保存
+            self.auto_save()  
         else:
             print("警告: selected_index 小于0，无法更新基础值")
 
@@ -622,7 +609,7 @@ class TriggerEditor(QMainWindow):
         new_c = {"type": self.c_type.currentData()}
         self.current_triggers[self.selected_index]["conditions"].append(new_c)
         self.on_trigger_selected(self.selected_index)
-        self.auto_save()  # 自动保存
+        self.auto_save()  
 
     def add_action(self):
         if self.selected_index < 0: return
@@ -665,7 +652,7 @@ class TriggerEditor(QMainWindow):
             self.act_tree.setCurrentItem(new_item)
             self.on_act_clicked(new_item)
 
-        self.auto_save()  # 自动保存
+        self.auto_save()  
 
     def delete_condition(self):
         item = self.cond_tree.currentItem()
@@ -684,7 +671,7 @@ class TriggerEditor(QMainWindow):
         if target_list is not None and data in target_list:
             target_list.remove(data)
             self.on_trigger_selected(self.selected_index)
-            self.auto_save()  # 自动保存
+            self.auto_save()  
 
     def delete_action(self):
         item = self.act_tree.currentItem()
@@ -694,7 +681,7 @@ class TriggerEditor(QMainWindow):
         if data in target_list:
             target_list.remove(data)
             self.on_trigger_selected(self.selected_index)
-            self.auto_save()  # 自动保存
+            self.auto_save()  
 
 if __name__ == "__main__":
     app = QApplication(sys.argv); ex = TriggerEditor(); ex.show(); sys.exit(app.exec())

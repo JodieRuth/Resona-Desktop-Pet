@@ -171,6 +171,7 @@ class ApplicationController(QObject):
         self.behavior_monitor = BehaviorMonitor(self.config, self)
         self.behavior_monitor.fullscreen_status_changed.connect(self._handle_fullscreen_status)
         self.behavior_monitor.trigger_matched.connect(self._handle_behavior_trigger)
+        self.main_window.file_dropped.connect(self.behavior_monitor.on_file_dropped)
         self.behavior_monitor.start()
         self._mocker_process = None
         if self.config.debug_trigger:

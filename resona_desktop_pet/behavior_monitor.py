@@ -35,7 +35,13 @@ class BehaviorMonitor(QThread):
         self.last_music_title = ""
         self._last_mock_data = {}
         self.plugin_status_cache = {}
+        self.dropped_file_cache = None  
         self.load_triggers()
+
+    def on_file_dropped(self, file_info: dict):
+        """处理UI层发出的文件拖入信号"""
+        self.dropped_file_cache = file_info
+        logging.info(f"[Behavior] 文件拖入: name={file_info.get('name')}, ext={file_info.get('ext')}")
 
     def _poll_plugins(self):
         pm = self.config.pack_manager
@@ -128,8 +134,14 @@ class BehaviorMonitor(QThread):
                     win_info = WindowInfo(0, 0, m.get("win_title"), m.get("win_pname"), (0,0,0,0), m.get("win_url"))
 
                     logging.debug(f"[Behavior] 使用 mock 数据检查: plugins={m.get('plugins', {})}")
+                    
+                    mock_uptime = m.get("process_uptime")
+                    mock_battery = m.get("battery", {})
+                    mock_file_drop = m.get("file_drop", {})
+                    
                     self._process_rule_matching(now, win_info, float(m.get("idle_sec", 0)), hw_stats, clip_text, m.get("weather", {}), is_startup, m.get("date"), m.get("time"),
-                                              clip_changed=clip_changed_text, music_title=curr_music, music_changed=music_changed_text)
+                                              clip_changed=clip_changed_text, music_title=curr_music, music_changed=music_changed_text,
+                                              mock_uptime=mock_uptime, mock_battery=mock_battery, mock_file_drop=mock_file_drop)
                     self.last_clip_text = clip_text
 
                     if "plugins" in m:
@@ -171,7 +183,7 @@ class BehaviorMonitor(QThread):
             self.last_music_title = curr_music
         except Exception as e:
             logging.error(f"[Behavior] Check failed: {e}")
-    def _process_rule_matching(self, now, win, idle, hw, clip, weather, is_startup, m_date=None, m_time=None, clip_changed="", music_title="", music_changed=""):
+    def _process_rule_matching(self, now, win, idle, hw, clip, weather, is_startup, m_date=None, m_time=None, clip_changed="", music_title="", music_changed="", mock_uptime=None, mock_battery=None, mock_file_drop=None):
         is_debug = self.config.debug_trigger
         is_recovering = (idle < 1.0 and self.last_cycle_idle > 1.0)
         recovery_duration = self.last_cycle_idle if is_recovering else 0.0
@@ -185,7 +197,7 @@ class BehaviorMonitor(QThread):
                 if self.trigger_counts.get(gid, 0) >= rule.get("max_triggers", 9999): continue
                 if now - getattr(self, "_last_any_trigger_time", 0) < self.config.trigger_cooldown: continue
             ui = getattr(self.controller.main_window, "stats", {})
-            matched = self._check_recursive_logic(rule, win, idle, recovery_duration, hw, ui, clip, weather, rule_id, m_date, m_time, clip_changed, music_title, music_changed)
+            matched = self._check_recursive_logic(rule, win, idle, recovery_duration, hw, ui, clip, weather, rule_id, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=mock_uptime, mock_battery=mock_battery, mock_file_drop=mock_file_drop)
             if matched:
                 if not is_debug and random.random() > rule.get("probability", 1.0): continue
                 logging.info(f"[Behavior] Trigger Matched: {rule_id}")
@@ -194,7 +206,7 @@ class BehaviorMonitor(QThread):
                 self.trigger_counts[gid] = self.trigger_counts.get(gid, 0) + 1
                 self.trigger_matched.emit(rule.get("actions", []))
                 break
-    def _check_recursive_logic(self, node, win, idle, recovery, hw, ui, clip, weather, rid, m_date, m_time, clip_changed, music_title, music_changed, path="root") -> bool:
+    def _check_recursive_logic(self, node, win, idle, recovery, hw, ui, clip, weather, rid, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=None, mock_battery=None, mock_file_drop=None, path="root") -> bool:
         logic = node.get("logic", "AND").upper()
         conds = node.get("conditions", [])
         if not conds: return False
@@ -202,9 +214,9 @@ class BehaviorMonitor(QThread):
         for i, c in enumerate(conds):
             c_path = f"{path}_{i}"
             if "logic" in c:
-                res = self._check_recursive_logic(c, win, idle, recovery, hw, ui, clip, weather, rid, m_date, m_time, clip_changed, music_title, music_changed, c_path)
+                res = self._check_recursive_logic(c, win, idle, recovery, hw, ui, clip, weather, rid, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=mock_uptime, mock_battery=mock_battery, mock_file_drop=mock_file_drop, c_path=c_path)
             else:
-                res, _ = self._test_single_condition_v6(c, win, idle, recovery, hw, ui, clip, weather, m_date, m_time, clip_changed, music_title, music_changed)
+                res, _ = self._test_single_condition_v6(c, win, idle, recovery, hw, ui, clip, weather, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=mock_uptime, mock_battery=mock_battery, mock_file_drop=mock_file_drop)
             if logic == "CUMULATIVE":
                 if res: self.rule_hit_states.setdefault(rid, {})[c_path] = True
                 results.append(self.rule_hit_states.get(rid, {}).get(c_path, False))
@@ -214,9 +226,10 @@ class BehaviorMonitor(QThread):
         if logic == "OR": return any(results)
         if logic == "CUMULATIVE": return all(results)
         return False
-    def _test_single_condition_v6(self, c, win, idle, recovery, hw, ui, clip, weather, m_date, m_time, clip_changed, music_title, music_changed):
+    def _test_single_condition_v6(self, c, win, idle, recovery, hw, ui, clip, weather, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=None, mock_battery=None, mock_file_drop=None):
         t = c.get("type")
         res, pids = False, []
+        is_debug = mock_uptime is not None
         if t == "cpu_temp": res = hw["cpu_temp"] > c.get("gt", 0)
         elif t == "gpu_temp": res = hw["gpu_temp"] > c.get("gt", 0)
         elif t == "cpu_usage": res = hw["cpu_usage"] > c.get("gt", 0)
@@ -298,6 +311,110 @@ class BehaviorMonitor(QThread):
                 s, e = c.get("range", "").split("-")
                 res = datetime.strptime(s, "%H:%M").time() <= now_t <= datetime.strptime(e, "%H:%M").time()
             except: res = False
+        elif t == "process_uptime":
+            pname = c.get("pname", "")
+            if not pname.endswith(".exe"):
+                pname = pname + ".exe"
+            if is_debug and mock_uptime is not None:
+                uptime = mock_uptime
+                gt = c.get("gt", 0)
+                lt = c.get("lt")
+                if lt is not None:
+                    res = gt < uptime < lt
+                else:
+                    res = uptime > gt
+                if res and c.get("log", False):
+                    logging.info(f"[Behavior] Mock进程存活: {pname} 已运行 {uptime}s")
+            else:
+                targets = [pid for pid, info in self.pid_history.items() if info["name"].lower() == pname.lower()]
+                if targets:
+                    uptime = time.time() - self.pid_history[targets[0]]["start_time"]
+                    gt = c.get("gt", 0)
+                    lt = c.get("lt")
+                    if lt is not None:
+                        res = gt < uptime < lt
+                    else:
+                        res = uptime > gt
+                    if res and c.get("log", False):
+                        logging.info(f"[Behavior] 进程存活: {pname} 已运行 {uptime:.1f}s")
+                else:
+                    res = False
+        elif t == "battery_level":
+            if is_debug and mock_battery:
+                percent = mock_battery.get("level", 0)
+                charging = mock_battery.get("charging", False)
+                gt = c.get("gt")
+                lt = c.get("lt")
+                expect_charging = c.get("charging")
+                if expect_charging is not None:
+                    res = (charging == expect_charging) and (
+                        (gt is not None and percent > gt) if gt is not None else True
+                    ) and (
+                        (lt is not None and percent < lt) if lt is not None else True
+                    )
+                else:
+                    if gt is not None and lt is not None:
+                        res = gt < percent < lt
+                    elif gt is not None:
+                        res = percent > gt
+                    elif lt is not None:
+                        res = percent < lt
+                    else:
+                        res = True
+                if res and c.get("log", False):
+                    logging.info(f"[Behavior] Mock电池: {percent}%, 充电中={charging}")
+            else:
+                try:
+                    import psutil
+                    battery = psutil.sensors_battery()
+                    if battery is not None:
+                        percent = battery.percent
+                        gt = c.get("gt")
+                        lt = c.get("lt")
+                        charging = battery.power_plugged
+                        if c.get("charging") is not None:
+                            res = (charging == c["charging"]) and (
+                                (gt is not None and percent > gt) if gt is not None else True
+                            ) and (
+                                (lt is not None and percent < lt) if lt is not None else True
+                            )
+                        else:
+                            if gt is not None and lt is not None:
+                                res = gt < percent < lt
+                            elif gt is not None:
+                                res = percent > gt
+                            elif lt is not None:
+                                res = percent < lt
+                            else:
+                                res = True
+                        if res and c.get("log", False):
+                            logging.info(f"[Behavior] 电池: {percent}%, 充电中={charging}")
+                    else:
+                        res = False
+                except: res = False
+        elif t == "file_drop":
+            if is_debug and mock_file_drop:
+                file_ext = mock_file_drop.get("ext", "")
+                file_name = mock_file_drop.get("name", "")
+                exts = [e.lower() for e in c.get("exts", [])]
+                name_keywords = [k.lower() for k in c.get("name_keywords", [])]
+                ext_match = not exts or file_ext in exts
+                name_match = not name_keywords or any(kw in file_name.lower() for kw in name_keywords)
+                res = ext_match and name_match
+                if res and c.get("log", False):
+                    logging.info(f"[Behavior] Mock文件拖入匹配: {file_name}")
+            elif self.dropped_file_cache:
+                file_ext = self.dropped_file_cache.get("ext", "")
+                file_name = self.dropped_file_cache.get("name", "")
+                exts = [e.lower() for e in c.get("exts", [])]
+                name_keywords = [k.lower() for k in c.get("name_keywords", [])]
+                ext_match = not exts or file_ext in exts
+                name_match = not name_keywords or any(kw in file_name.lower() for kw in name_keywords)
+                res = ext_match and name_match
+                if res and c.get("log", False):
+                    logging.info(f"[Behavior] 文件拖入匹配: {file_name}")
+            else:
+                res = False
         return res, pids
     def _get_idle_time(self):
         class LASTINPUTINFO(ctypes.Structure):

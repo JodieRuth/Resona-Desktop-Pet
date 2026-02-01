@@ -52,7 +52,6 @@ class DialogueBox(QFrame):
     def _setup_ui(self):
         self.setObjectName("dialogueBox")
         self.setStyleSheet("""
-            #dialogueBox {
                 background-color: rgba(0, 0, 0, 80);
                 border-radius: 10px;
                 border: 2px solid rgba(255, 255, 255, 100);
@@ -67,7 +66,7 @@ class DialogueBox(QFrame):
         self.name_label = QLabel(self.config.character_name)
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.name_label.setStyleSheet(f"""
-            color: #FFD700;
+            color: 
             font-size: {name_font_size}px;
             font-weight: bold;
             font-family: "Yu Gothic UI", "Microsoft YaHei", sans-serif;
@@ -97,12 +96,12 @@ class DialogueBox(QFrame):
                 font-family: "Yu Gothic UI", "Microsoft YaHei", sans-serif;
             }}
             QLineEdit:focus {{
-                border: 1px solid #FFD700;
+                border: 1px solid 
                 background-color: rgba(255, 255, 255, 50);
             }}
             QLineEdit:disabled {{
                 background-color: rgba(100, 100, 100, 50);
-                color: #888888;
+                color: 
             }}
         """)
         self.input_field.returnPressed.connect(self._on_submit)
@@ -533,7 +532,7 @@ class MainWindow(QWidget):
         menu.setStyleSheet("""
             QMenu {
                 background-color: rgba(40, 40, 40, 230);
-                border: 1px solid #555;
+                border: 1px solid 
                 border-radius: 5px;
                 padding: 5px;
             }
@@ -547,7 +546,7 @@ class MainWindow(QWidget):
             }
             QMenu::separator {
                 height: 1px;
-                background: #555;
+                background: 
                 margin: 5px 10px;
             }
         """)

@@ -15,7 +15,6 @@ def process_file(file_path):
             img = img.convert("RGBA")
             orig_w, orig_h = img.size
 
-            # Scale down if it exceeds target dimensions
             scale = min(TARGET_WIDTH / orig_w, TARGET_HEIGHT / orig_h, 1.0)
             if scale < 1.0:
                 new_size = (int(orig_w * scale), int(orig_h * scale))
@@ -24,16 +23,13 @@ def process_file(file_path):
             else:
                 w, h = orig_w, orig_h
 
-            # Create target canvas (transparent)
             canvas = Image.new("RGBA", (TARGET_WIDTH, TARGET_HEIGHT), (0, 0, 0, 0))
             
-            # Calculate position: center-bottom
             x = (TARGET_WIDTH - w) // 2
             y = TARGET_HEIGHT - h
             
             canvas.paste(img, (x, y), img)
 
-            # Save result
             output_dir = Path(file_path).parent / "processed_1280x720"
             output_dir.mkdir(exist_ok=True)
             output_path = output_dir / Path(file_path).name

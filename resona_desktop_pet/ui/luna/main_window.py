@@ -17,6 +17,7 @@ class MainWindow(QWidget):
     replay_requested = Signal()
     pack_changed = Signal(str)
     settings_requested = Signal()
+    file_dropped = Signal(dict)  
     def __init__(self, config: ConfigManager, parent: QWidget = None):
         super().__init__(parent)
         self.config = config
@@ -109,11 +110,16 @@ class MainWindow(QWidget):
         self.text_display_timer.timeout.connect(self.finish_processing)
         self.io.submitted.connect(self.on_query_submitted)
         self.io.text_changed.connect(self.on_input_text_changed)
+        self.io.file_dropped.connect(self.on_file_dropped)
         self.character.rightClicked.connect(self.show_context_menu)
         
         QTimer.singleShot(0, self.sync_window_to_sprite)
         self.dialogue = self.DialogueAdapter(self)
         self.sprite = self.SpriteAdapter(self)
+
+        self.setAcceptDrops(True)
+        self.character.setAcceptDrops(True)
+        self.io.setAcceptDrops(True)
 
     class DialogueAdapter:
         def __init__(self, window):
@@ -376,6 +382,9 @@ class MainWindow(QWidget):
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         
+        self.setAcceptDrops(True)
+        self.character.setAcceptDrops(True)
+        self.io.setAcceptDrops(True)
 
         if was_visible or not self.manual_hidden:
             self.show()
@@ -441,6 +450,11 @@ class MainWindow(QWidget):
         self.io.set_bounds(box)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        event_type = event.type()
+        
+        if event_type in (QEvent.DragEnter, QEvent.DragMove, QEvent.DragLeave, QEvent.Drop):
+            return super().eventFilter(obj, event)
+        
         now = time.time()
         
 
@@ -634,7 +648,7 @@ class MainWindow(QWidget):
         menu.setStyleSheet("""
             QMenu {
                 background-color: rgba(40, 40, 40, 230);
-                border: 1px solid #555;
+                border: 1px solid 
                 border-radius: 5px;
                 padding: 5px;
             }
@@ -648,7 +662,7 @@ class MainWindow(QWidget):
             }
             QMenu::separator {
                 height: 1px;
-                background: #555;
+                background: 
                 margin: 5px 10px;
             }
         """ )
@@ -720,3 +734,34 @@ class MainWindow(QWidget):
     def closeEvent(self, event):
         QApplication.instance().quit()
         super().closeEvent(event)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            print(f"[UI] dragEnterEvent 收到 URLs: {[u.toLocalFile() for u in event.mimeData().urls()]}")
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            print(f"[UI] dropEvent 收到 URLs")
+            for url in event.mimeData().urls():
+                if url.isLocalFile():
+                    file_path = url.toLocalFile()
+                    if os.path.isfile(file_path):
+                        path = Path(file_path)
+                        file_info = {
+                            "path": str(path),
+                            "name": path.name,
+                            "stem": path.stem,
+                            "ext": path.suffix.lower() if path.suffix else ""
+                        }
+                        self.file_dropped.emit(file_info)
+                        print(f"[UI] 文件拖入: {file_info}")
+            event.acceptProposedAction()
+
+    def on_file_dropped(self, file_info: dict):
+        self.file_dropped.emit(file_info)
+        print(f"[UI] 收到文件拖入: {file_info}")

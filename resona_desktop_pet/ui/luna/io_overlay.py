@@ -2,12 +2,15 @@ from PySide6.QtCore import Qt, QRect, Signal, QEvent, QObject, QTimer
 from PySide6.QtGui import QPainter, QColor, QFont, QKeyEvent, QResizeEvent, QPaintEvent
 from PySide6.QtWidgets import QWidget, QTextEdit, QLabel, QFrame
 from typing import Optional
+import os
+from pathlib import Path
 
 class IOOverlay(QWidget):
 
     
     submitted = Signal(str)
     text_changed = Signal(str)
+    file_dropped = Signal(dict)
     
     def __init__(self, parent: QWidget = None):
         super().__init__(parent)
@@ -187,16 +190,43 @@ class IOOverlay(QWidget):
         
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if obj == self.edit and event.type() == QEvent.KeyPress:
-            key_event = event # type: QKeyEvent
+            key_event = event 
             just_enter = (key_event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)) and \
                          not (key_event.modifiers() & (Qt.KeyboardModifier.ShiftModifier | 
                                                        Qt.KeyboardModifier.ControlModifier | 
                                                        Qt.KeyboardModifier.AltModifier))
-            
+                
             if just_enter:
                 text = self.edit.toPlainText().strip()
                 if text:
                     self.submitted.emit(text)
                 return True
-        
+                
         return super().eventFilter(obj, event)
+        
+    def dragEnterEvent(self, event):
+        print(f"[IOOverlay] dragEnterEvent")
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+    
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+    
+    def dropEvent(self, event):
+        print(f"[IOOverlay] dropEvent")
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            for url in event.mimeData().urls():
+                if url.isLocalFile():
+                    file_path = url.toLocalFile()
+                    if os.path.isfile(file_path):
+                        path = Path(file_path)
+                        file_info = {
+                            "path": str(path),
+                            "name": path.name,
+                            "stem": path.stem,
+                            "ext": path.suffix.lower() if path.suffix else ""
+                        }
+                        self.file_dropped.emit(file_info)
+                        print(f"[IOOverlay] 文件拖入: {file_info}")

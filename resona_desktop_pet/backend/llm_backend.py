@@ -75,7 +75,7 @@ class LLMBackend:
                     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
                 }
             
-            elif model_type == "local" or model_type in [1, 2, 4, 6]:
+            elif model_type == "local" or model_type in [1, 2, 4, 6, 7, 8, 9]:
                 from openai import AsyncOpenAI
                 self._openai_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
                 
@@ -307,7 +307,7 @@ class LLMBackend:
             messages = self._build_messages(question)
             processed_question = messages[-1]["content"]
 
-            if model_type == "local" or model_type in [1, 2, 4, 6]:
+            if model_type == "local" or model_type in [1, 2, 4, 6, 7, 8, 9]:
                 response = await self.query_openai_compatible(
                     messages, model_name,
                     temperature=llm_config.get("temperature", 0.7),

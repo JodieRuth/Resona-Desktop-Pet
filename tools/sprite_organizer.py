@@ -17,7 +17,7 @@ class SpriteOrganizer(QMainWindow):
         
         self.source_dir = None
         self.outfit_name = ""
-        self.items = [] # List of {'path': Path, 'emotion': str}
+        self.items = [] 
         self.EMOTIONS = [
             "<E:smile>", "<E:serious>", "<E:angry>", "<E:sad>", 
             "<E:thinking>", "<E:surprised>", "<E:dislike>", 
@@ -31,7 +31,6 @@ class SpriteOrganizer(QMainWindow):
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
 
-        # Top controls
         top = QHBoxLayout()
         self.open_btn = QPushButton("1. Open Folder")
         self.open_btn.clicked.connect(self.open_folder)
@@ -42,7 +41,6 @@ class SpriteOrganizer(QMainWindow):
         top.addWidget(self.outfit_edit)
         layout.addLayout(top)
 
-        # Main Area: Scrollable Grid
         self.scroll = QScrollArea()
         self.grid_widget = QWidget()
         self.grid = QGridLayout(self.grid_widget)
@@ -50,7 +48,6 @@ class SpriteOrganizer(QMainWindow):
         self.scroll.setWidget(self.grid_widget)
         layout.addWidget(self.scroll)
 
-        # Bottom
         self.save_btn = QPushButton("2. Rename & Generate sum.json")
         self.save_btn.clicked.connect(self.process_sprites)
         layout.addWidget(self.save_btn)
@@ -60,12 +57,10 @@ class SpriteOrganizer(QMainWindow):
         if not dir_path: return
         self.source_dir = Path(dir_path)
         
-        # Load images
         self.items = []
         valid_exts = ['.png', '.jpg', '.webp']
         files = [f for f in self.source_dir.iterdir() if f.suffix.lower() in valid_exts]
         
-        # Clear grid
         for i in reversed(range(self.grid.count())): 
             self.grid.itemAt(i).widget().setParent(None)
 
@@ -106,7 +101,6 @@ class SpriteOrganizer(QMainWindow):
 
         sum_data = {}
         
-        # Group by emotion to handle numbering
         emo_groups = {}
         for item in self.items:
             emo = item['emotion']
@@ -116,8 +110,6 @@ class SpriteOrganizer(QMainWindow):
         for emo, group in emo_groups.items():
             sum_data[emo] = []
             for i, item in enumerate(group):
-                # Format: outfit_emoIndex_variant
-                # We'll use a simplified naming: emoName_index
                 clean_emo = emo.replace("<E:", "").replace(">", "").replace(":", "_")
                 new_name = f"{self.outfit_name}_{clean_emo}_{i:02d}"
                 dest_path = target_root / (new_name + item['path'].suffix)

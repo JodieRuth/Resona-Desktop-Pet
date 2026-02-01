@@ -81,9 +81,9 @@ This program has a plugin system that allows you to load external .py files from
 Using `trigger_editor.py`, you can configure highly personalized reaction logic. Current capabilities include:
 
 ### 1. Conditions
-- **System Monitoring**: CPU/GPU temperature and usage.
-- **Software Detection**: Specific process in focus, specific process running in background, specific URL visited (Chrome/Edge only), window title keyword matching.
-- **User Interaction**: Hover duration, pointer leave duration, long press duration, double-click/combo count.
+- **System Monitoring**: CPU/GPU temperature and usage, battery level (laptop).
+- **Software Detection**: Specific process in focus, specific process running in background, process uptime, specific URL visited (Chrome/Edge only), window title keyword matching.
+- **User Interaction**: Hover duration, pointer leave duration, long press duration, double-click/combo count, **file drop detection**.
 - **Environment Awareness**: Full-screen mode detection, weather matching, currently playing music (Netease Cloud Music only).
 - **Time & Date**: Specific dates or time periods.
 - **Others**: Idle time detection, resume from idle, clipboard keyword matching.

@@ -125,3 +125,33 @@ class CharacterView(QWidget):
         if event.button() == Qt.MouseButton.LeftButton: self.leftClicked.emit()
         elif event.button() == Qt.MouseButton.RightButton: self.rightClicked.emit()
         event.ignore()
+
+    def dragEnterEvent(self, event):
+        print(f"[CharacterView] dragEnterEvent")
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        print(f"[CharacterView] dropEvent")
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            parent = self.parent()
+            if parent and hasattr(parent, 'on_file_dropped'):
+                for url in event.mimeData().urls():
+                    if url.isLocalFile():
+                        file_path = url.toLocalFile()
+                        if os.path.isfile(file_path):
+                            import os
+                            from pathlib import Path
+                            path = Path(file_path)
+                            file_info = {
+                                "path": str(path),
+                                "name": path.name,
+                                "stem": path.stem,
+                                "ext": path.suffix.lower() if path.suffix else ""
+                            }
+                            parent.on_file_dropped(file_info)

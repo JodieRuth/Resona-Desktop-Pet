@@ -25,14 +25,14 @@ class SettingsDialog(QDialog):
         self.setMinimumSize(500, 450)
         self.setStyleSheet("""
             QDialog {
-                background-color: #1e1e1e;
+                background-color: 
             }
             QLabel {
-                color: #ffffff;
+                color: 
             }
             QGroupBox {
-                color: #ffffff;
-                border: 1px solid #555;
+                color: 
+                border: 1px solid 
                 border-radius: 5px;
                 margin-top: 10px;
                 padding-top: 10px;
@@ -43,15 +43,15 @@ class SettingsDialog(QDialog):
                 padding: 0 5px;
             }
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
-                background-color: #2d2d2d;
-                border: 1px solid #555;
+                background-color: 
+                border: 1px solid 
                 border-radius: 3px;
                 color: white;
                 padding: 5px;
                 min-height: 25px;
             }
             QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
-                border: 1px solid #0078d4;
+                border: 1px solid 
             }
             QCheckBox {
                 color: white;
@@ -61,7 +61,7 @@ class SettingsDialog(QDialog):
                 height: 18px;
             }
             QPushButton {
-                background-color: #0078d4;
+                background-color: 
                 color: white;
                 border: none;
                 border-radius: 3px;
@@ -69,31 +69,31 @@ class SettingsDialog(QDialog):
                 min-width: 80px;
             }
             QPushButton:hover {
-                background-color: #1084d8;
+                background-color: 
             }
             QPushButton:pressed {
-                background-color: #006cbd;
+                background-color: 
             }
-            QPushButton#cancelButton {
-                background-color: #555;
+            QPushButton
+                background-color: 
             }
-            QPushButton#cancelButton:hover {
-                background-color: #666;
+            QPushButton
+                background-color: 
             }
             QTabWidget::pane {
-                border: 1px solid #555;
+                border: 1px solid 
                 border-radius: 5px;
-                background-color: #252525;
+                background-color: 
             }
             QTabBar::tab {
-                background-color: #2d2d2d;
-                color: #aaa;
+                background-color: 
+                color: 
                 padding: 8px 20px;
                 border-top-left-radius: 5px;
                 border-top-right-radius: 5px;
             }
             QTabBar::tab:selected {
-                background-color: #252525;
+                background-color: 
                 color: white;
             }
         """)

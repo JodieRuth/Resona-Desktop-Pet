@@ -13,16 +13,22 @@
 - **系统状态**：
   - `cpu_temp` / `gpu_temp`: 检测温度是否超过设定值。
   - `cpu_usage` / `gpu_usage`: 检测占用率是否过高。
+  - `battery_level`: 检测电池电量（需笔记本，支持充电状态检测）。
 - **软件环境**：
   - `process_active`: 当特定软件（如 `League of Legends.exe`）在前台时触发。
+  - `process_background`: 检测特定进程在后台运行。
+  - `process_uptime`: 检测进程已存活的时间。
   - `url_match`: 当浏览器访问特定网页（如 `github.com`）时触发。
+  - `title_match`: 窗口标题匹配关键词。
 - **用户交互**：
   - `hover_duration`: 鼠标放在宠物身上多久。
   - `click_count`: 快速点击几次。
   - `long_press`: 长按立绘。
+  - `file_drop`: 检测拖入到立绘区域的文件（支持按后缀名和文件名关键词匹配）。
 - **环境信息**：
   - `weather_match`: 匹配当前天气。
   - `time_range`: 在特定时间段内（如 `23:00-05:00`）。
+  - `music_match`: 网易云音乐正在播放的歌曲匹配。
 - **逻辑嵌套**：
   - `AND`: 所有子条件必须全部满足。
   - `OR`: 满足其中一个即可。

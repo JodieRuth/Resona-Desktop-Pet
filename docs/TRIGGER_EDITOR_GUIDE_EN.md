@@ -13,16 +13,22 @@ You can combine multiple conditions. Supported types include:
 - **System State**:
   - `cpu_temp` / `gpu_temp`: Checks if temperature exceeds a threshold.
   - `cpu_usage` / `gpu_usage`: Checks if usage is too high.
+  - `battery_level`: Checks battery level (laptop only, supports charging state detection).
 - **Software Environment**:
   - `process_active`: Fires when a specific app (e.g., `League of Legends.exe`) is in focus.
+  - `process_background`: Detects if specific process is running in background.
+  - `process_uptime`: Checks how long a process has been running.
   - `url_match`: Fires when a browser visits a specific URL (e.g., `github.com`).
+  - `title_match`: Matches window title keywords.
 - **User Interaction**:
   - `hover_duration`: How long the mouse hovers over the pet.
   - `click_count`: Detects rapid click combos.
   - `long_press`: Long press detection.
+  - `file_drop`: Detects files dropped onto the pet area (supports extension and filename keyword matching).
 - **Contextual Info**:
   - `weather_match`: Matches current weather conditions.
   - `time_range`: Fires during specific time periods (e.g., `23:00-05:00`).
+  - `music_match`: Matches currently playing music in NetEase Cloud Music.
 - **Logic Nesting**:
   - `AND`: All sub-conditions must be met.
   - `OR`: Any one sub-condition is enough.
