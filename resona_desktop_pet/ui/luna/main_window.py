@@ -279,7 +279,7 @@ class MainWindow(QWidget):
             self.io.edit.clear()
             self.io.edit.setPlaceholderText("Listening...")
         else:
-            self.io.edit.setPlaceholderText("Type here...")
+            self.io.edit.setPlaceholderText("Type and press Enter...")
 
     def set_emotion(self, emotion_tag: str):
         self.character.set_emotion(emotion_tag)
@@ -372,6 +372,7 @@ class MainWindow(QWidget):
 
         was_visible = self.isVisible()
         old_pos = self.pos() if was_visible else None
+        old_geometry = self.geometry() if was_visible else None
         
         flags = Qt.WindowType.FramelessWindowHint
         if not self.config.show_in_taskbar:
@@ -381,6 +382,7 @@ class MainWindow(QWidget):
             
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DropSiteRegistered, True)
         
         self.setAcceptDrops(True)
         self.character.setAcceptDrops(True)
@@ -388,9 +390,12 @@ class MainWindow(QWidget):
 
         if was_visible or not self.manual_hidden:
             self.show()
+            QTimer.singleShot(50, self._reapply_drag_drop)
 
-            if was_visible and old_pos and old_pos.x() > -5000:
+            if old_pos and old_pos.x() > -5000:
                 self.move(old_pos)
+            elif old_geometry:
+                self.setGeometry(old_geometry)
             self.raise_()
             
             if self.config.always_on_top:
@@ -399,6 +404,13 @@ class MainWindow(QWidget):
                     self.topmost_timer.start()
             else:
                 self.topmost_timer.stop()
+
+    def _reapply_drag_drop(self):
+        self.setAcceptDrops(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DropSiteRegistered, True)
+        self.character.setAcceptDrops(True)
+        self.io.setAcceptDrops(True)
+        print(f"[UI] _reapply_drag_drop: MainWindow acceptsDrops={self.acceptDrops()}, IOOverlay acceptsDrops={self.io.acceptDrops()}")
 
     def refresh_from_config(self):
         img_rect = self.character.image_rect()
@@ -724,17 +736,6 @@ class MainWindow(QWidget):
     def is_busy(self) -> bool:
         return self.is_processing or self.is_speaking or self.is_listening
         
-    def showEvent(self, event):
-        super().showEvent(event)
-        screen = QGuiApplication.primaryScreen().availableGeometry()
-        self.move(screen.bottomRight() - QPoint(self.width() + 24, self.height() + 24))
-        self.sync_window_to_sprite()
-        self._reinforce_topmost()
-
-    def closeEvent(self, event):
-        QApplication.instance().quit()
-        super().closeEvent(event)
-
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             print(f"[UI] dragEnterEvent 收到 URLs: {[u.toLocalFile() for u in event.mimeData().urls()]}")
@@ -765,3 +766,53 @@ class MainWindow(QWidget):
     def on_file_dropped(self, file_info: dict):
         self.file_dropped.emit(file_info)
         print(f"[UI] 收到文件拖入: {file_info}")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if sys.platform == "win32":
+            try:
+                hwnd = int(self.winId())
+                ctypes.windll.shell32.DragAcceptFiles(hwnd, True)
+                print(f"[UI] 已注册Windows拖放接收器, hwnd={hwnd}")
+                
+                GWL_EXSTYLE = -20
+                WS_EX_ACCEPT_FILES = 0x00000010
+                current_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current_style | WS_EX_ACCEPT_FILES)
+                print(f"[UI] 设置WS_EX_ACCEPT_FILES: 0x{current_style | WS_EX_ACCEPT_FILES:08X}")
+            except Exception as e:
+                print(f"[UI] 注册拖放接收器失败: {e}")
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        self.move(screen.bottomRight() - QPoint(self.width() + 24, self.height() + 24))
+        self.sync_window_to_sprite()
+        self._reinforce_topmost()
+
+    def closeEvent(self, event):
+        QApplication.instance().quit()
+        super().closeEvent(event)
+
+    def nativeEvent(self, event_type, message):
+        if event_type == "windows_dispatcher_MSG":
+            msg = ctypes.wintypes.MSG.from_address(message.__int__())
+            if msg.message == 0x0233:
+                print(f"[UI] nativeEvent 收到 WM_DROPFILES")
+                hdrop = msg.wParam
+                file_count = ctypes.windll.shell32.DragQueryFileW(hdrop, 0xFFFFFFFF, None, 0)
+                for i in range(file_count):
+                    buf_len = 260
+                    buf = ctypes.create_unicode_buffer(buf_len)
+                    ctypes.windll.shell32.DragQueryFileW(hdrop, i, buf, buf_len)
+                    file_path = buf.value
+                    if os.path.isfile(file_path):
+                        path = Path(file_path)
+                        file_info = {
+                            "path": str(path),
+                            "name": path.name,
+                            "stem": path.stem,
+                            "ext": path.suffix.lower() if path.suffix else ""
+                        }
+                        print(f"[UI] Windows原生拖放: {file_info}")
+                        self.on_file_dropped(file_info)
+                ctypes.windll.shell32.DragFinish(hdrop)
+                return True, 0
+        return super().nativeEvent(event_type, message)

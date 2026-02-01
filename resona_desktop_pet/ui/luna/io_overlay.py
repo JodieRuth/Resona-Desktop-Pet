@@ -41,6 +41,7 @@ class IOOverlay(QWidget):
         self.edit.viewport().setAutoFillBackground(False)
         self.edit.setStyleSheet("background: transparent; color: white;")
         self.edit.setPlaceholderText("Type and press Enter...")
+        self.edit.setAcceptDrops(False)
         self.edit.installEventFilter(self)
         self.edit.textChanged.connect(self._on_text_changed)
         

@@ -24,7 +24,7 @@ You can combine multiple conditions. Supported types include:
   - `hover_duration`: How long the mouse hovers over the pet.
   - `click_count`: Detects rapid click combos.
   - `long_press`: Long press detection.
-  - `file_drop`: Detects files dropped onto the pet area (supports extension and filename keyword matching).
+  - `file_drop`: ~~Detects files dropped onto the pet area (supports extension and filename keyword matching)~~ `Temporarily Unavailable`
 - **Contextual Info**:
   - `weather_match`: Matches current weather conditions.
   - `time_range`: Fires during specific time periods (e.g., `23:00-05:00`).
