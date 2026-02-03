@@ -1,5 +1,8 @@
 [English](README_EN.md) | [中文](README.md)
 
+> **🚀 Want to create your own desktop pet?**  
+> Check out our latest **[🎨 Beginner's Resource Pack Creation & Modification Guide](docs/CUSTOM_PACK_GUIDE_FOR_BEGINNERS_EN.md)** and build your unique companion from scratch!
+
 # ResonaDesktopPet
 
 ResonaDesktopPet is a versatile desktop pet project that integrates Large Language Models (LLM), Text-to-Speech (SoVITS), and Speech-to-Text (STT) technologies to provide a vivid and natural interactive experience.
@@ -33,6 +36,7 @@ To help you better understand and use this project, we have prepared detailed do
 - **[Resource Pack System](docs/RESOURCE_PACKS_EN.md)**: How to create and customize your own characters.
 - **[Developer Tools Guide](docs/TOOLS_GUIDE_EN.md)**: Comprehensive guide for the four built-in tools.
 - **[Interaction Trigger Guide](docs/TRIGGER_EDITOR_GUIDE_EN.md)**: Learn how to use the editor to make your pet smarter.
+- **[Beginner's Guide to Custom Packs](docs/CUSTOM_PACK_GUIDE_FOR_BEGINNERS_EN.md)**: The most detailed zero-base tutorial for character customization.
 
 ## 🌟 Key Features
 

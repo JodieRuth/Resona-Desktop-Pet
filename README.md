@@ -1,5 +1,8 @@
 [English](README_EN.md) | [中文](README.md)
 
+> **🚀 想要制作自己的桌宠角色？**  
+> 查看最新发布的 **[🎨 小白资源包创作/修改保姆级指南](docs/CUSTOM_PACK_GUIDE_FOR_BEGINNERS.md)**，从零开始打造你的专属伴侣！
+
 # ResonaDesktopPet
 
 这是一个通用的桌面宠物项目，通过集成大语言模型 (LLM)、语音合成 (SoVITS) 与语音识别 (STT) 技术，实现了生动、自然的交互体验。
@@ -33,6 +36,7 @@
 - **[资源包系统](docs/RESOURCE_PACKS.md)**：如何制作和自定义您自己的角色。
 - **[开发工具指南](docs/TOOLS_GUIDE.md)**：内置四个辅助工具的详细使用方法。
 - **[交互触发器指南](docs/TRIGGER_EDITOR_GUIDE.md)**：教您如何使用编辑器让宠物更智能。
+- **[小白资源包创作指南](docs/CUSTOM_PACK_GUIDE_FOR_BEGINNERS.md)**：**最详细**的零基础角色定制教程。
 
 ## 🌟 核心特性
 

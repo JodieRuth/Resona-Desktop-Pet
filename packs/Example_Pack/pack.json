@@ -15,11 +15,15 @@
                 "id": "example_outfit",
                 "path": "assets/sprites/example_outfit",
                 "is_default": true
+            },
+            {
+                "id": "example_outfit_alt",
+                "path": "assets/sprites/example_outfit_alt"
             }
         ],
         "sovits_model": {
-            "vits_weights": "models/sovits/character.pth",
-            "gpt_weights": "models/sovits/character.ckpt",
+            "vits_weights": "models/sovits/character_v1.pth",
+            "gpt_weights": "models/sovits/character_v1.ckpt",
             "version": "v2Pro"
         }
     },
@@ -29,6 +33,10 @@
             {
                 "id": "default",
                 "path": "prompts/character_prompt.txt"
+            },
+            {
+                "id": "dark",
+                "path": "prompts/dark_prompt.txt"
             }
         ],
         "interaction_configs": {
