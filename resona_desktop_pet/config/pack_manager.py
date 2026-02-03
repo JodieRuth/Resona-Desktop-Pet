@@ -68,9 +68,9 @@ class PackManager:
                     spec.loader.exec_module(module)
 
                     has_info = hasattr(module, "INFO")
-                    print(f"[PackManager] 检查插件 {f.name}: hasattr(INFO)={has_info}")
+                    print(f"[PackManager] Checking plugin {f.name}: hasattr(INFO)={has_info}")
                     if has_info:
-                        print(f"[PackManager] INFO 内容: {module.INFO}")
+                        print(f"[PackManager] INFO content: {module.INFO}")
 
                     if has_info:
                         plugin_id = module.INFO.get("id")
@@ -81,15 +81,15 @@ class PackManager:
                             print(f"[PackManager] triggers: {triggers}")
                             for t in triggers:
                                 t_type = t.get("type")
-                                print(f"[PackManager] 处理 trigger: type={t_type}")
+                                print(f"[PackManager] Processing trigger: type={t_type}")
                                 if t_type:
                                     self.plugin_trigger_map[t_type] = plugin_id
-                                    print(f"[PackManager] 已注册 trigger: {t_type} -> {plugin_id}")
+                                    print(f"[PackManager] Registered trigger: {t_type} -> {plugin_id}")
                             for a in module.INFO.get("actions", []):
                                 a_type = a.get("type")
                                 if a_type: self.plugin_action_map[a_type] = plugin_id
                             print(f"[PackManager] Loaded plugin: {plugin_id}")
-                            print(f"[PackManager] 当前 plugin_trigger_map: {self.plugin_trigger_map}")
+                            print(f"[PackManager] Current plugin_trigger_map: {self.plugin_trigger_map}")
             except Exception as e:
                 print(f"[PackManager] Failed to load plugin {f.name}: {e}")
                 import traceback

@@ -230,4 +230,4 @@ class IOOverlay(QWidget):
                             "ext": path.suffix.lower() if path.suffix else ""
                         }
                         self.file_dropped.emit(file_info)
-                        print(f"[IOOverlay] 文件拖入: {file_info}")
+                        print(f"[IOOverlay] File dropped: {file_info}")

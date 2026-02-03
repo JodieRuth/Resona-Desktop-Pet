@@ -4,6 +4,7 @@ import random
 import ctypes
 import psutil
 import logging
+import ctypes.wintypes
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -486,10 +487,51 @@ class BehaviorMonitor(QThread):
         except: return ""
     def _is_fullscreen(self, info: WindowInfo) -> bool:
         try:
-            sw = ctypes.windll.user32.GetSystemMetrics(0); sh = ctypes.windll.user32.GetSystemMetrics(1)
-            ww, wh = info.rect[2]-info.rect[0], info.rect[3]-info.rect[1]
-            return (ww >= sw and wh >= sh) if info.process_name not in ["explorer.exe", "taskbar"] else False
-        except (OverflowError, ValueError):
+            if info.process_name in ["explorer.exe", "taskbar"]:
+                return False
+            
+            hwnd = info.hwnd
+            if not hwnd:
+                return False
+            
+            GWL_EXSTYLE = -20
+            WS_EX_TOOLWINDOW = 0x00000080
+            WS_EX_APPWINDOW = 0x00040000
+            exstyle = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            
+            if exstyle & WS_EX_TOOLWINDOW:
+                return False
+            
+            monitor = ctypes.windll.user32.MonitorFromWindow(hwnd, 2)
+            if not monitor:
+                return False
+            
+            class MONITORINFO(ctypes.Structure):
+                _fields_ = [("cbSize", ctypes.c_uint),
+                           ("rcMonitor", ctypes.wintypes.RECT),
+                           ("rcWork", ctypes.wintypes.RECT),
+                           ("dwFlags", ctypes.c_uint)]
+            
+            mi = MONITORINFO()
+            mi.cbSize = ctypes.sizeof(MONITORINFO)
+            ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(mi))
+            
+            work_left = mi.rcWork.left
+            work_top = mi.rcWork.top
+            work_right = mi.rcWork.right
+            work_bottom = mi.rcWork.bottom
+            
+            win_left = info.rect[0]
+            win_top = info.rect[1]
+            win_right = info.rect[2]
+            win_bottom = info.rect[3]
+            
+            if (win_left == work_left and win_top == work_top and 
+                win_right == work_right and win_bottom == work_bottom):
+                return True
+            
+            return False
+        except (OverflowError, ValueError, AttributeError):
             return False
     def _get_cloudmusic_title(self) -> str:
         if not self.config.monitor_music: return ""

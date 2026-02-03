@@ -369,37 +369,35 @@ class MainWindow(QWidget):
                 pass
 
     def _apply_window_settings(self):
-
-        was_visible = self.isVisible()
-        old_pos = self.pos() if was_visible else None
-        old_geometry = self.geometry() if was_visible else None
-        
         flags = Qt.WindowType.FramelessWindowHint
-        if not self.config.show_in_taskbar:
-            flags |= Qt.WindowType.Tool 
         if self.config.always_on_top:
             flags |= Qt.WindowType.WindowStaysOnTopHint
-            
-        self.setWindowFlags(flags)
+        
+        current_flags = self.windowFlags()
+        if flags != current_flags:
+            self.setWindowFlags(flags)
+            if self.isVisible():
+                super().show()
+                self._reinforce_topmost()
+                self.sync_window_to_sprite()
+        
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DropSiteRegistered, True)
         
-        self.setAcceptDrops(True)
-        self.character.setAcceptDrops(True)
-        self.io.setAcceptDrops(True)
-
-        if was_visible or not self.manual_hidden:
+        if not hasattr(self, '_drag_drop_initialized'):
+            self.setAcceptDrops(True)
+            self.character.setAcceptDrops(True)
+            self.io.setAcceptDrops(True)
+            self._drag_drop_initialized = True
+        
+        if not self.isVisible() and not self.manual_hidden:
             self.show()
-            QTimer.singleShot(50, self._reapply_drag_drop)
-
-            if old_pos and old_pos.x() > -5000:
-                self.move(old_pos)
-            elif old_geometry:
-                self.setGeometry(old_geometry)
             self.raise_()
-            
+            self._reinforce_topmost()
+        elif self.isVisible():
+            self.raise_()
+            self._reinforce_topmost()
             if self.config.always_on_top:
-                self._reinforce_topmost()
                 if not self.topmost_timer.isActive():
                     self.topmost_timer.start()
             else:
@@ -410,7 +408,6 @@ class MainWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DropSiteRegistered, True)
         self.character.setAcceptDrops(True)
         self.io.setAcceptDrops(True)
-        print(f"[UI] _reapply_drag_drop: MainWindow acceptsDrops={self.acceptDrops()}, IOOverlay acceptsDrops={self.io.acceptDrops()}")
 
     def refresh_from_config(self):
         img_rect = self.character.image_rect()
@@ -625,10 +622,11 @@ class MainWindow(QWidget):
         self._update_visibility()
         
     def manual_show(self):
+        if not self.manual_hidden:
+            return
         self.manual_hidden = False
         self.cancel_idle_fade()
         self._apply_window_settings()
-        self.activateWindow()
 
     def _reset_stays_on_top(self):
         if not self.manual_hidden and not self.config.always_on_top:
@@ -640,11 +638,12 @@ class MainWindow(QWidget):
     def _update_visibility(self):
         should_hide = self.manual_hidden or self.fullscreen_hidden
         if should_hide:
-            super().hide()
+            if self.isVisible():
+                super().hide()
         else:
-            super().show()
-            self.sync_window_to_sprite()
-            self._reinforce_topmost()
+            if not self.isVisible():
+                super().show()
+                self._reinforce_topmost()
 
     def safe_set_outfit(self, outfit: str):
         try:
@@ -738,7 +737,7 @@ class MainWindow(QWidget):
         
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
-            print(f"[UI] dragEnterEvent 收到 URLs: {[u.toLocalFile() for u in event.mimeData().urls()]}")
+            print(f"[UI] dragEnterEvent received URLs: {[u.toLocalFile() for u in event.mimeData().urls()]}")
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event):
@@ -747,7 +746,7 @@ class MainWindow(QWidget):
 
     def dropEvent(self, event):
         if event.mimeData().hasUrls():
-            print(f"[UI] dropEvent 收到 URLs")
+            print(f"[UI] dropEvent received URLs")
             for url in event.mimeData().urls():
                 if url.isLocalFile():
                     file_path = url.toLocalFile()
@@ -760,12 +759,11 @@ class MainWindow(QWidget):
                             "ext": path.suffix.lower() if path.suffix else ""
                         }
                         self.file_dropped.emit(file_info)
-                        print(f"[UI] 文件拖入: {file_info}")
+                        print(f"[UI] File dropped: {file_info}")
             event.acceptProposedAction()
 
     def on_file_dropped(self, file_info: dict):
         self.file_dropped.emit(file_info)
-        print(f"[UI] 收到文件拖入: {file_info}")
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -773,17 +771,17 @@ class MainWindow(QWidget):
             try:
                 hwnd = int(self.winId())
                 ctypes.windll.shell32.DragAcceptFiles(hwnd, True)
-                print(f"[UI] 已注册Windows拖放接收器, hwnd={hwnd}")
                 
                 GWL_EXSTYLE = -20
                 WS_EX_ACCEPT_FILES = 0x00000010
                 current_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
                 ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current_style | WS_EX_ACCEPT_FILES)
-                print(f"[UI] 设置WS_EX_ACCEPT_FILES: 0x{current_style | WS_EX_ACCEPT_FILES:08X}")
             except Exception as e:
-                print(f"[UI] 注册拖放接收器失败: {e}")
-        screen = QGuiApplication.primaryScreen().availableGeometry()
-        self.move(screen.bottomRight() - QPoint(self.width() + 24, self.height() + 24))
+                pass
+        if not hasattr(self, '_initial_position_set'):
+            screen = QGuiApplication.primaryScreen().availableGeometry()
+            self.move(screen.bottomRight() - QPoint(self.width() + 24, self.height() + 24))
+            self._initial_position_set = True
         self.sync_window_to_sprite()
         self._reinforce_topmost()
 
@@ -795,7 +793,6 @@ class MainWindow(QWidget):
         if event_type == "windows_dispatcher_MSG":
             msg = ctypes.wintypes.MSG.from_address(message.__int__())
             if msg.message == 0x0233:
-                print(f"[UI] nativeEvent 收到 WM_DROPFILES")
                 hdrop = msg.wParam
                 file_count = ctypes.windll.shell32.DragQueryFileW(hdrop, 0xFFFFFFFF, None, 0)
                 for i in range(file_count):
@@ -811,7 +808,7 @@ class MainWindow(QWidget):
                             "stem": path.stem,
                             "ext": path.suffix.lower() if path.suffix else ""
                         }
-                        print(f"[UI] Windows原生拖放: {file_info}")
+                        print(f"[UI] Windows native drop: {file_info}")
                         self.on_file_dropped(file_info)
                 ctypes.windll.shell32.DragFinish(hdrop)
                 return True, 0
