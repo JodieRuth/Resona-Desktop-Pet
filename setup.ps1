@@ -39,7 +39,11 @@ Clear-Host
 Write-Host $DISCLAIMER -ForegroundColor Yellow
 
 # --- 0. Mirror Setup ---
-$useMirror = Read-Host 'Use hf-mirror.com? (Highly recommended for Mainland China) (Y/N, default is N)'
+Write-Host "`n[Mirror] Enable mirror acceleration? (Highly recommended for Mainland China)" -ForegroundColor Cyan
+Write-Host "  - HuggingFace -> hf-mirror.com (Models & Assets)"
+Write-Host "  - GitHub      -> gh-proxy.com  (STT Models)"
+Write-Host "  - PyPI        -> tsinghua.edu  (Python Dependencies)"
+$useMirror = Read-Host 'Enable these mirrors? (Y/N, default is N)'
 if ($useMirror -eq 'Y' -or $useMirror -eq 'y') {
     $SOVITS_URL = $SOVITS_URL -replace 'huggingface.co', 'hf-mirror.com'
     $PACK_URL = $PACK_URL -replace 'huggingface.co', 'hf-mirror.com'
