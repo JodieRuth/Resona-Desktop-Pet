@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import os
 from pathlib import Path
 project_root = Path(__file__).parent.absolute()
@@ -106,11 +106,26 @@ class ApplicationController(QObject):
         self.can_monitor_gpu = True
         try:
             import subprocess
-            raw_out = subprocess.check_output("wmic path win32_VideoController get name", shell=True, stderr=subprocess.STDOUT)
+            output = ""
             try:
-                output = raw_out.decode("utf-8")
-            except UnicodeDecodeError:
-                output = raw_out.decode("gbk", errors="ignore")
+                raw_out = subprocess.check_output("wmic path win32_VideoController get name", shell=True, stderr=subprocess.STDOUT)
+                try:
+                    output = raw_out.decode("utf-8")
+                except UnicodeDecodeError:
+                    output = raw_out.decode("gbk", errors="ignore")
+            except Exception:
+                pass
+
+            if not output.strip() or "wmic" in output.lower():
+                try:
+                    raw_out = subprocess.check_output('powershell -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"', shell=True, stderr=subprocess.STDOUT)
+                    try:
+                        output = raw_out.decode("utf-8")
+                    except UnicodeDecodeError:
+                        output = raw_out.decode("gbk", errors="ignore")
+                except Exception as ps_e:
+                    if not output.strip():
+                        log(f"[Main] GPU detection failed (both wmic and powershell): {ps_e}")
 
             output_up = output.upper()
             if "AMD" in output_up or "RADEON" in output_up:
