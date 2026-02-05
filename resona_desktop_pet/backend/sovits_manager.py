@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import subprocess
 import time
@@ -56,8 +56,12 @@ class SoVITSManager:
                     with open(pth_path, "w", encoding="utf-8") as f: f.write(fix_code)
             except: pass
 
-        if not self.api_script.exists(): return False
-        if not self.config_file.exists(): return False
+        if not self.api_script.exists():
+            print(f"[SoVITS] Error: API script not found at {self.api_script}")
+            return False
+        if not self.config_file.exists():
+            print(f"[SoVITS] Error: Config file not found at {self.config_file}")
+            return False
         actual_config_file = self.config_file
         pack_id = "Resona_Default"
         try:
@@ -115,12 +119,15 @@ class SoVITSManager:
                     content = re.sub(r'version:.*', f'version: {self.model_version}', content)
                 with open(override_path, "w", encoding="utf-8") as f: f.write(content)
                 actual_config_file = override_path
-            except Exception: pass
+                print(f"[SoVITS] Applied CUDA config override: {actual_config_file}")
+            except Exception as e:
+                print(f"[SoVITS] Warning: Failed to apply CUDA config override: {e}")
         python_exec = sys.executable
         embedded_python = self.gpt_sovits_dir / "runtime" / "python.exe"
         if sys.platform == "win32" and embedded_python.exists(): python_exec = str(embedded_python)
         
         cmd = [python_exec, self.rel_api_script, "-a", "127.0.0.1", "-p", str(self.port), "-c", str(Path(actual_config_file).absolute())]
+        print(f"[SoVITS] Starting process with command: {' '.join(cmd)}")
         try:
             if sys.platform == "win32":
                 startupinfo = subprocess.STARTUPINFO()
@@ -147,14 +154,25 @@ class SoVITSManager:
                 except Exception: pass
             threading.Thread(target=stream_output, args=(self.process.stdout, "[SoVITS]"), daemon=True).start()
             threading.Thread(target=stream_output, args=(self.process.stderr, "[SoVITS Error]"), daemon=True).start()
+            
+            print(f"[SoVITS] Process started (PID: {self.process.pid}). Waiting for API to be ready...")
             start_time = time.time()
             while time.time() - start_time < timeout:
-                if self.is_running(): return True
-                if self.process.poll() is not None: return False
+                if self.is_running():
+                    print(f"[SoVITS] API is ready after {time.time() - start_time:.2f}s")
+                    return True
+                if self.process.poll() is not None:
+                    exit_code = self.process.poll()
+                    print(f"[SoVITS] Error: Process exited unexpectedly with code {exit_code}")
+                    return False
                 time.sleep(0.5)
+            
+            print(f"[SoVITS] Error: Startup timed out after {timeout}s")
             self.stop()
             return False
-        except Exception: return False
+        except Exception as e:
+            print(f"[SoVITS] Exception during startup: {e}")
+            return False
     
     def _kill_process_on_port(self, port: int):
         for proc in psutil.process_iter(['pid', 'name']):

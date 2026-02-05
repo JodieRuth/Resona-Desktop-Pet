@@ -132,6 +132,10 @@ class ApplicationController(QObject):
                 self.gpu_vendor = "AMD"
                 self.can_monitor_gpu = False
                 log("[Main] AMD GPU detected. Disabling GPU monitoring features to prevent crashes.")
+                if self.config.sovits_device == "cuda":
+                    log("[Main] AMD GPU detected but SoVITS device is 'cuda'. Forcing to 'cpu' for compatibility.")
+                    self.config.set("SoVITS", "device", "cpu")
+                    self.config.save()
             elif "NVIDIA" in output_up:
                 self.gpu_vendor = "NVIDIA"
                 log("[Main] NVIDIA GPU detected. GPU monitoring enabled.")
