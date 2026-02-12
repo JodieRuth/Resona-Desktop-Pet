@@ -27,6 +27,36 @@ Clear-Host
 Write-Host $DISCLAIMER -ForegroundColor Yellow
 Write-Host "`n[Resona] Starting One-Click Setup (Zero-Config Mode)..." -ForegroundColor Cyan
 
+# --- 0. C++ Runtime Check ---
+Write-Host "[Check] Checking for Microsoft Visual C++ Redistributable..." -ForegroundColor Cyan
+$vc_installed = $false
+$vc_registry_paths = @(
+    "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+)
+
+foreach ($path in $vc_registry_paths) {
+    if (Test-Path $path) {
+        $vc_installed = $true
+        break
+    }
+}
+
+if (-not $vc_installed) {
+    Write-Host "[Warning] Microsoft Visual C++ Redistributable (2015-2022) not detected!" -ForegroundColor Yellow
+    Write-Host "This is REQUIRED for the application to run."
+    Write-Host "Download link: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    $installVC = Read-Host 'Would you like to open the download page? (Y/N, default is Y)'
+    if ($installVC -ne 'N' -and $installVC -ne 'n') {
+        Start-Process "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        Write-Host "Please install the redistributable and then restart this script." -ForegroundColor Yellow
+        pause
+        exit
+    }
+} else {
+    Write-Host "[Resona] C++ Runtime detected." -ForegroundColor Green
+}
+
 # --- GPU Detection ---
 $gpus = Get-CimInstance Win32_VideoController
 foreach ($gpu in $gpus) {

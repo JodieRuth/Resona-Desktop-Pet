@@ -2,8 +2,15 @@
 
 Follow these steps to get your ResonaDesktopPet up and running in minutes.
 
+## 0. Prerequisites
+**Required Environment**:
+- **Microsoft Visual C++ Redistributable (2015-2022)**:
+  - Many core libraries (PySide6, NumPy, SoVITS) depend on this.
+  - **[Download x64 version from Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe)** and install it.
+- **Python 3.12** (if not using the Full Runtime mode in `setup.ps1`).
+
 ## 1. Installation
-1. **Clone the Repo**: `git clone https://github.com/YourUsername/Resona-Desktop-Pet.git`
+1. **Clone the Repo**: `git clone https://github.com/JodieRuth/Resona-Desktop-Pet.git`
 2. **Setup Environment**:
    - Right-click `setup.ps1` and select **"Run with PowerShell"**. 
    - **Option 2 (Recommended)**: Creates a dedicated Runtime environment, keeping your system Python clean.

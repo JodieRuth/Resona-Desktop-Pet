@@ -52,6 +52,35 @@ if ($useMirror -eq 'Y' -or $useMirror -eq 'y') {
     Write-Host "[Resona] Using Mirrors: hf-mirror.com & gh-proxy.com" -ForegroundColor Cyan
 }
 
+# --- 0.1 C++ Runtime Check ---
+Write-Host "`n[Check] Checking for Microsoft Visual C++ Redistributable..." -ForegroundColor Cyan
+$vc_installed = $false
+$vc_registry_paths = @(
+    "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+)
+
+foreach ($path in $vc_registry_paths) {
+    if (Test-Path $path) {
+        $vc_installed = $true
+        break
+    }
+}
+
+if (-not $vc_installed) {
+    Write-Host "[Warning] Microsoft Visual C++ Redistributable (2015-2022) not detected!" -ForegroundColor Yellow
+    Write-Host "This is REQUIRED for PySide6, NumPy, and SoVITS to run."
+    Write-Host "Download link: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    $installVC = Read-Host 'Would you like to open the download page? (Y/N, default is Y)'
+    if ($installVC -ne 'N' -and $installVC -ne 'n') {
+        Start-Process "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        Write-Host "Please install the redistributable and then restart this script." -ForegroundColor Yellow
+        pause
+    }
+} else {
+    Write-Host "[Resona] C++ Runtime detected." -ForegroundColor Green
+}
+
 # --- 1. Proxy Setup ---
 $useProxy = Read-Host 'Do you need a proxy for downloading? (Y/N, default is N)'
 if ($useProxy -eq 'Y' -or $useProxy -eq 'y') {

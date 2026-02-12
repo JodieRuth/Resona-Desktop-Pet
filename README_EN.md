@@ -11,6 +11,7 @@ Please obtain resource packs compatible with this program on your own.
 
 ## 💡 Usage Tips
 
+- **Environment Requirement**: This project depends on the **Microsoft Visual C++ Redistributable (2015-2022)**. If you encounter errors or see a warning in `run.bat`, please [download and install it from Microsoft](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 - **Sprite Aspect Ratio**: The UI does not strictly limit resolution, but please ensure your sprite files are **16:9**.
 - **Performance**: TTS speed depends on your inference hardware, while LLM response speed depends on your network quality.
 - **Voice Tuning**: If you are unsatisfied with the default voice quality, you can replace the reference audio and annotation text pointed to in `emotion.json` within your resource pack.
