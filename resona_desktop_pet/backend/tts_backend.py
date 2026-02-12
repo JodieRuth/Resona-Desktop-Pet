@@ -28,6 +28,8 @@ class TTSBackend:
         self.timeout = aiohttp.ClientTimeout(total=config.sovits_timeout)
     def _load_emotions_config(self) -> dict:
         json_path = self.config.pack_manager.get_path("logic", "emotions")
+        active_pack = getattr(self.config.pack_manager, "active_pack_id", "")
+        print(f"[TTS] Loading emotions config: pack={active_pack} path={json_path}")
         if json_path and json_path.exists():
             try:
                 with open(json_path, "r", encoding="utf-8") as f:
@@ -36,7 +38,14 @@ class TTSBackend:
                     return data
             except Exception as e:
                 log(f"[TTS] CRITICAL: Error loading pack emotions.json: {e}")
+        else:
+            log(f"[TTS] Emotions config missing: {json_path}")
         return {}
+
+    def reload_config(self):
+        self.emotions_config = self._load_emotions_config()
+        active_pack = getattr(self.config.pack_manager, "active_pack_id", "")
+        log(f"[TTS] Emotions config reloaded. pack={active_pack} count={len(self.emotions_config)}")
     def _get_emotion_config(self, emotion: str) -> dict:
         target = emotion.split("|")[0] if "|" in emotion else emotion
         if target not in self.emotions_config:

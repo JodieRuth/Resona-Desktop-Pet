@@ -34,7 +34,9 @@ class PackManager:
                     except: pass
 
     def set_active_pack(self, pack_id: str):
+        self._scan_packs()
         folder_name = self.id_map.get(pack_id, pack_id)
+        print(f"[PackManager] set_active_pack requested={pack_id} resolved={folder_name} packs_dir={self.packs_dir}")
         self.active_pack_id = folder_name
         self._load_pack_manifest()
         self._unload_plugins()
@@ -96,19 +98,25 @@ class PackManager:
                 traceback.print_exc()
 
     def _load_pack_manifest(self):
+        self.pack_data = {}
         manifest_path = self.packs_dir / self.active_pack_id / "pack.json"
+        print(f"[PackManager] Loading manifest: {manifest_path}")
         if manifest_path.exists():
             try:
                 with open(manifest_path, "r", encoding="utf-8") as f:
                     self.pack_data = json.load(f)
+                info = self.pack_data.get("pack_info", {})
+                character = self.pack_data.get("character", {})
+                outfits = character.get("outfits", [])
+                prompts = self.pack_data.get("logic", {}).get("prompts", [])
+                print(f"[PackManager] Manifest loaded: pack_id={info.get('id')} name={info.get('name')} character={character.get('name')} outfits={len(outfits)} prompts={len(prompts)}")
             except Exception as e:
                 print(f"[PackManager] Error loading manifest: {e}")
         else:
             print(f"[PackManager] Manifest not found: {manifest_path}")
 
     def get_info(self, key: str, default: Any = None) -> Any:
-        if not self.pack_data:
-            self._load_pack_manifest()
+        self._load_pack_manifest()
 
         if key in self.pack_data:
             return self.pack_data[key]

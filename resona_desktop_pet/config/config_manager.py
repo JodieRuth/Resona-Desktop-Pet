@@ -19,8 +19,16 @@ class ConfigManager:
     def load(self):
         if self.config_path.exists():
             self.config.read(self.config_path, encoding="utf-8")
+            if hasattr(self, 'pack_manager'):
+                active_pack = self.config.get("General", "active_pack", fallback="Resona_Default")
+                if active_pack:
+                    print(f"[Config] load active_pack={active_pack} config_path={self.config_path}")
+                    self.pack_manager.set_active_pack(active_pack)
 
     def save(self) -> None:
+        active_pack = self.config.get("General", "active_pack", fallback="")
+        if active_pack:
+            print(f"[Config] save active_pack={active_pack} config_path={self.config_path}")
 
         if not self.config_path.exists():
             with open(self.config_path, "w", encoding="utf-8") as f:

@@ -24,7 +24,7 @@ from resona_desktop_pet.ui.luna.main_window import MainWindow
 from resona_desktop_pet.ui.tray_icon import TrayIcon
 from resona_desktop_pet.cleanup_manager import cleanup_manager
 from resona_desktop_pet.behavior_monitor import BehaviorMonitor
-log_dir = Path("logs")
+log_dir = project_root / "logs"
 log_dir.mkdir(exist_ok=True)
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 log_file = log_dir / f"app_{timestamp}.log"
@@ -85,9 +85,10 @@ class ApplicationController(QObject):
     stt_result_ready = Signal(object)
     request_stt_start = Signal()
     request_global_show = Signal()
+    pack_switch_ready = Signal()  
     def __init__(self, sovits_log_path: Optional[Path] = None):
         super().__init__()
-        self.config = ConfigManager()
+        self.config = ConfigManager(str(project_root / "config.cfg"))
         self.config.print_all_configs()
         pm = self.config.pack_manager
         log(f"[Debug] PackManager Active ID: {pm.active_pack_id}")
@@ -149,6 +150,8 @@ class ApplicationController(QObject):
         self._last_busy_state = False
         self._pending_triggers = []
         self._is_chain_executing = False
+        self._chain_cancelled = False
+        self._drop_tts_results = False
         self.current_weather = {}
         self.interaction_locked = False
         self.state = self._load_state()
@@ -199,6 +202,9 @@ class ApplicationController(QObject):
             log(f"[Debug] debugtrigger is ENABLED. Starting sensor mocker: {mocker_script}")
             self._mocker_process = subprocess.Popen([sys.executable, str(mocker_script)], cwd=str(self.project_root))
         self.main_window.pack_changed.connect(self._handle_pack_change)
+        self.main_window._pack_change_handler_connected = True
+        log("[PackSwitch] pack_changed signal connected")
+        self.pack_switch_ready.connect(self._finalize_ui_after_pack_change, Qt.QueuedConnection)
         self.main_window.request_query.connect(self._handle_user_query)
         self.main_window.replay_requested.connect(self._replay_last_response)
         self.main_window.settings_requested.connect(self._show_settings)
@@ -213,6 +219,11 @@ class ApplicationController(QObject):
         self._busy_watchdog = QTimer()
         self._busy_watchdog.setSingleShot(True)
         self._busy_watchdog.timeout.connect(self._force_unlock)
+        self._pack_switch_wait_timer = QTimer()
+        self._pack_switch_wait_timer.setInterval(500)
+        self._pack_switch_wait_timer.timeout.connect(self._check_pack_switch_ready)
+        self._pack_switch_pending = False
+        self._pack_switch_deadline = 0.0
         QTimer.singleShot(2000, self._check_startup_events)
         QTimer.singleShot(1000, self._init_hotkeys)
         QTimer.singleShot(500, self.main_window.manual_show)
@@ -285,6 +296,9 @@ class ApplicationController(QObject):
         self._trigger_voice_response(response.text_display, response.emotion, None, tts_text=response.text_tts, tts_lang=tts_lang_for_trigger)
     def _handle_tts_ready(self, result):
         log(f"[Main] TTS synthesized ready. Success={not result.error}")
+        if self._drop_tts_results or self._pack_switch_pending:
+            log("[Main] Dropping TTS result due to pack switch.")
+            return
         self.main_window.show_response(self._current_text, self._current_emotion)
         if result.error:
             self._show_error_response("sovits_timeout_error", result.error)
@@ -327,6 +341,7 @@ class ApplicationController(QObject):
         self.tts_ready.emit(result)
     def _handle_behavior_trigger(self, actions: list):
         if not actions or self.main_window.manual_hidden: return
+        if self._pack_switch_pending: return
         if self.interaction_locked: return
         if self.main_window.is_processing or self.main_window.is_listening:
             return
@@ -355,14 +370,41 @@ class ApplicationController(QObject):
             trigger = self._pending_triggers.pop(0)
             self._trigger_cooldown_end = now + self.config.trigger_cooldown
             self._execute_actions_chain(trigger)
+    def _cancel_action_chain(self):
+        self._chain_cancelled = True
+        self._is_chain_executing = False
+        self._drop_tts_results = True
+        self._current_sequence = []
+        self._current_sequence_idx = 0
+        self._pending_triggers = []
+        if self._current_chain_callback:
+            try: self.audio_player.playback_finished.disconnect(self._current_chain_callback)
+            except: pass
+        self._current_chain_callback = None
+        try:
+            self.audio_player.stop()
+        except Exception:
+            pass
+        try:
+            self.main_window.set_speaking(False)
+            self.main_window.finish_processing()
+        except Exception:
+            pass
+        try:
+            self._busy_watchdog.stop()
+        except Exception:
+            pass
     def _execute_actions_chain(self, actions):
         self._is_chain_executing = True
+        self._chain_cancelled = False
         self._current_sequence = actions
         self._current_sequence_idx = 0
 
         self._current_chain_callback = None
 
         def execute_next():
+            if self._chain_cancelled:
+                return
             if self._current_sequence_idx >= len(self._current_sequence):
                 if self._current_chain_callback:
                     try: self.audio_player.playback_finished.disconnect(self._current_chain_callback)
@@ -458,27 +500,111 @@ class ApplicationController(QObject):
                         params = action.get("params", [])
                         threading.Thread(target=module.execute_action, args=(atype, params), daemon=True).start()
     def _handle_pack_change(self, pack_id: str):
-        log(f"[Main] Switching pack to {pack_id}")
+        log(f"[PackSwitch] Start: requested={pack_id} current_active={self.config.pack_manager.active_pack_id} project_root={self.project_root}")
+        self._cancel_action_chain()
         self.main_window.hide()
+        
         self.config.pack_manager.set_active_pack(pack_id)
         self.config.pack_manager.load_plugins(self.config.plugins_enabled)
 
         pdata = self.config.pack_manager.pack_data
-        new_name = pdata.get("character", {}).get("name", "Unknown")
-        new_outfit = pdata.get("character", {}).get("outfits", [{}])[0].get("id", "default")
+        character = pdata.get("character", {})
+        new_name = character.get("name", "Unknown")
+        outfits = character.get("outfits", [])
+        target_outfit = next((o for o in outfits if o.get("is_default")), None)
+        if not target_outfit and outfits:
+            target_outfit = outfits[0]
+        new_outfit = target_outfit.get("id", "default") if target_outfit else "default"
         raw_prompt_rel = pdata.get("logic", {}).get("prompts", [{}])[0].get("path", "")
+        log(f"[PackSwitch] Pack data: active_pack_id={self.config.pack_manager.active_pack_id} name={new_name} default_outfit={new_outfit} prompt_rel={raw_prompt_rel}")
+        
         self.config.set("General", "active_pack", pack_id)
         self.config.set("General", "CharacterName", new_name)
         self.config.set("General", "default_outfit", new_outfit)
         self.config.set("Prompt", "file_path", Path(raw_prompt_rel).name)
+        
         self.config.save()
-        if self.config.sovits_enabled:
-            self.sovits_manager.stop()
-            self.sovits_manager.start(timeout=60, kill_existing=True)
+        self.config.load()
+        if not self.config.sovits_enabled:
+            try:
+                log(f"[PackSwitch] Pre-refresh config: active_pack={self.config.get('General','active_pack','')} default_outfit={self.config.default_outfit}")
+                self.main_window.refresh_from_config()
+                self.main_window.manual_show()
+            except Exception as e:
+                print(f"[PackSwitch] ERROR during pre-refresh: {e}")
+                traceback.print_exc()
+        else:
+            log("[PackSwitch] Deferring UI refresh until SoVITS ready")
+        
+        log("[PackSwitch] Reloading backends")
+        self.tts_backend.reload_config()
+        self.llm_backend.history.clear()
         self.behavior_monitor.load_triggers()
-        self.main_window.load_thinking_texts()
-        self.main_window.load_listening_texts()
-        self.main_window.manual_show()
+
+        self._pack_switch_pending = True
+        self._pack_switch_deadline = time.time() + 75
+        if not self._pack_switch_wait_timer.isActive():
+            self._pack_switch_wait_timer.start()
+        log(f"[PackSwitch] Wait start: pending={self._pack_switch_pending} deadline={self._pack_switch_deadline} sovits_enabled={self.config.sovits_enabled}")
+
+        if self.config.sovits_enabled:
+            def wait_for_sovits_then_show():
+                print("[PackSwitch] Restarting SoVITS and waiting for API...")
+                try:
+                    self.sovits_manager.stop()
+                    success = self.sovits_manager.start(timeout=60, kill_existing=True)
+                    print(f"[PackSwitch] SoVITS start finished. Success={success}")
+                    
+                    print("[PackSwitch] Attempting to emit pack_switch_ready signal...")
+                    self.pack_switch_ready.emit()
+                    print("[PackSwitch] pack_switch_ready signal emitted.")
+                except Exception as e:
+                    print(f"[PackSwitch] CRITICAL ERROR in wait_for_sovits_then_show: {e}")
+                    traceback.print_exc()
+                    self.pack_switch_ready.emit()
+            
+            thread = threading.Thread(target=wait_for_sovits_then_show, daemon=True)
+            print(f"[PackSwitch] Starting background thread: {thread.name}")
+            thread.start()
+        else:
+            print("[PackSwitch] SoVITS disabled, emitting signal directly.")
+            self.pack_switch_ready.emit()
+
+    def _check_pack_switch_ready(self):
+        if not self._pack_switch_pending:
+            if self._pack_switch_wait_timer.isActive():
+                self._pack_switch_wait_timer.stop()
+            return
+        if self.config.sovits_enabled:
+            ready = self.sovits_manager.is_running()
+        else:
+            ready = True
+        timed_out = time.time() >= self._pack_switch_deadline
+        if ready or timed_out:
+            self._pack_switch_wait_timer.stop()
+            self._pack_switch_pending = False
+            self._finalize_ui_after_pack_change()
+
+    def _finalize_ui_after_pack_change(self):
+        print("[PackSwitch] Finalizing UI refresh (triggered by signal)...")
+        try:
+            if self._pack_switch_wait_timer.isActive():
+                self._pack_switch_wait_timer.stop()
+            self._pack_switch_pending = False
+            self._drop_tts_results = False
+            self.config.load()
+            print(f"[PackSwitch] Finalize config: active_pack={self.config.get('General','active_pack','')} default_outfit={self.config.default_outfit}")
+            self.main_window.refresh_from_config()
+            
+            if hasattr(self, 'tray_icon'):
+                self.tray_icon.hide()
+                self.tray_icon.show()
+                
+            self.main_window.manual_show()
+            print("[PackSwitch] Pack switch UI refresh complete.")
+        except Exception as e:
+            print(f"[PackSwitch] ERROR during UI finalize: {e}")
+            traceback.print_exc()
     def _show_error_response(self, error_type, details=""):
         error_config_path = self.config.pack_manager.get_path("logic", "error_config")
         text, emotion, audio = f"Error: {details}", "<E:sad>", None
@@ -599,7 +725,7 @@ def is_admin():
 def run_as_admin():
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), str(project_root), 1)
 def main():
-    config = ConfigManager()
+    config = ConfigManager(str(project_root / "config.cfg"))
     needs_admin = False
     trigger_path = config.pack_manager.get_path("logic", "triggers")
     if trigger_path and trigger_path.exists():

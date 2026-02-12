@@ -75,6 +75,7 @@ class BehaviorMonitor(QThread):
 
     def load_triggers(self):
         trigger_path = self.config.pack_manager.get_path("logic", "triggers")
+        logging.info(f"[Behavior] Loading triggers from: {trigger_path}")
         if trigger_path and trigger_path.exists():
             try:
                 with open(trigger_path, "r", encoding="utf-8") as f:
@@ -82,6 +83,8 @@ class BehaviorMonitor(QThread):
                 logging.info(f"[Behavior] Loaded {len(self.triggers)} triggers from pack.")
             except Exception as e:
                 logging.error(f"[Behavior] Load failed: {e}")
+        else:
+            logging.error(f"[Behavior] Trigger path missing or not found: {trigger_path}")
     def stop(self):
         self.running = False
     def run(self):

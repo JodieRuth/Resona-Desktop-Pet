@@ -24,18 +24,56 @@ class CharacterView(QWidget):
         
     def setup(self, project_root: Path, default_outfit: str = "risona_outfit_00"):
         self.project_root = project_root
+        self.emotion_map = {}
         self.current_outfit = default_outfit
+        print(f"[CharacterView] Setup with outfit: {default_outfit}")
         self._load_outfit(self.current_outfit)
+
+    def _resolve_pack_outfit(self, requested: str) -> str:
+        try:
+            config = getattr(self.parent(), "config", None)
+            if config and hasattr(config, "pack_manager"):
+                pack_manager = config.pack_manager
+                outfits = pack_manager.get_info("character", {}).get("outfits", [])
+                if outfits:
+                    if any(o.get("id") == requested for o in outfits):
+                        return requested
+                    fallback = next((o for o in outfits if o.get("is_default")), outfits[0])
+                    fallback_id = fallback.get("id")
+                    if fallback_id:
+                        print(f"[CharacterView] Outfit not in pack: {requested}, fallback: {fallback_id}")
+                        return fallback_id
+        except Exception as e:
+            print(f"[CharacterView] Error resolving outfit id: {e}")
+        return requested
         
     def _get_outfit_path(self, outfit: str) -> Path:
         if not self.project_root: return Path(".")
         try:
             config = getattr(self.parent(), "config", None)
-            pack_id = config.pack_manager.active_pack_id if config else "Resona_Default"
-            pack_outfit_path = self.project_root / "packs" / pack_id / "assets" / "sprites" / outfit
-            if pack_outfit_path.exists() and (pack_outfit_path / "sum.json").exists():
-                return pack_outfit_path
-        except: pass
+            if config and hasattr(config, "pack_manager"):
+                pack_manager = config.pack_manager
+                pack_id = pack_manager.active_pack_id
+                pack_root = pack_manager.packs_dir / pack_id
+                outfits = pack_manager.get_info("character", {}).get("outfits", [])
+                target = next((o for o in outfits if o.get("id") == outfit), None)
+                if target:
+                    rel_path = target.get("path", "")
+                    if rel_path:
+                        candidate = Path(rel_path)
+                        outfit_path = candidate if candidate.is_absolute() else pack_root / rel_path
+                        print(f"[CharacterView] Checking pack outfit path: {outfit_path}")
+                        if outfit_path.exists() and (outfit_path / "sum.json").exists():
+                            print(f"[CharacterView] Using pack outfit path: {outfit_path}")
+                            return outfit_path
+                pack_outfit_path = pack_root / "assets" / "sprites" / outfit
+                print(f"[CharacterView] Checking pack outfit path: {pack_outfit_path}")
+                if pack_outfit_path.exists() and (pack_outfit_path / "sum.json").exists():
+                    print(f"[CharacterView] Using pack outfit path: {pack_outfit_path}")
+                    return pack_outfit_path
+        except Exception as e:
+            print(f"[CharacterView] Error resolving outfit path: {e}")
+            pass
         return self.project_root / "resona_desktop_pet" / "ui" / "assets" / "modes" / outfit
 
     def get_available_outfits(self) -> List[str]:
@@ -43,11 +81,24 @@ class CharacterView(QWidget):
         outfits = set()
         try:
             config = getattr(self.parent(), "config", None)
-            pack_id = config.pack_manager.active_pack_id if config else "Resona_Default"
-            pack_sprites_path = self.project_root / "packs" / pack_id / "assets" / "sprites"
-            if pack_sprites_path.exists():
-                for item in pack_sprites_path.iterdir():
-                    if item.is_dir() and (item / "sum.json").exists(): outfits.add(item.name)
+            if config and hasattr(config, "pack_manager"):
+                pack_manager = config.pack_manager
+                pack_id = pack_manager.active_pack_id
+                pack_root = pack_manager.packs_dir / pack_id
+                outfit_defs = pack_manager.get_info("character", {}).get("outfits", [])
+                for outfit in outfit_defs:
+                    outfit_id = outfit.get("id")
+                    rel_path = outfit.get("path")
+                    if outfit_id and rel_path:
+                        candidate = Path(rel_path)
+                        outfit_path = candidate if candidate.is_absolute() else pack_root / rel_path
+                        if outfit_path.exists() and (outfit_path / "sum.json").exists():
+                            outfits.add(outfit_id)
+                if not outfits:
+                    pack_sprites_path = pack_root / "assets" / "sprites"
+                    if pack_sprites_path.exists():
+                        for item in pack_sprites_path.iterdir():
+                            if item.is_dir() and (item / "sum.json").exists(): outfits.add(item.name)
         except: pass
         modes_path = self.project_root / "resona_desktop_pet" / "ui" / "assets" / "modes"
         if modes_path.exists():
@@ -56,12 +107,14 @@ class CharacterView(QWidget):
         return sorted(list(outfits))
 
     def _load_outfit(self, outfit: str) -> bool:
-        outfit_path = self._get_outfit_path(outfit)
+        resolved = self._resolve_pack_outfit(outfit)
+        outfit_path = self._get_outfit_path(resolved)
+        print(f"[CharacterView] Loading outfit from: {outfit_path}")
         sum_json = outfit_path / "sum.json"
         if not sum_json.exists(): return False
         try:
             with open(sum_json, "r", encoding="utf-8") as f: self.emotion_map = json.load(f)
-            self.current_outfit = outfit
+            self.current_outfit = resolved
             return True
         except: return False
 
@@ -74,6 +127,8 @@ class CharacterView(QWidget):
     def set_emotion(self, emotion: str, deterministic: bool = False) -> bool:
         self.current_emotion = emotion
         if emotion == "<E:smile>": deterministic = True
+        if not self.emotion_map or self._resolve_pack_outfit(self.current_outfit) != self.current_outfit:
+            self._load_outfit(self.current_outfit)
         if not self.emotion_map: return False
         sprites = self.emotion_map.get(emotion, [])
         if not sprites:

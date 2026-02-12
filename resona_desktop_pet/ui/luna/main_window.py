@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import json
 import random
@@ -44,6 +44,7 @@ class MainWindow(QWidget):
         self.is_speaking = False
         self.is_displaying_text = False
         self.fade_hover_recovery_sec = 0.0
+        self._pack_change_handler_connected = False
         self.project_root = Path(self.config.config_path).parent
         
         self.setObjectName("MainRoot")
@@ -186,13 +187,14 @@ class MainWindow(QWidget):
                 print(f"Error loading listening texts: {e}")
 
     def on_input_text_changed(self, text: str):
-        if not self.is_processing and not self.is_listening:
-            if text.strip():
-                if self.character.current_emotion != "<E:thinking>":
-                    self.set_emotion("<E:thinking>")
-            else:
-                if self.character.current_emotion != "<E:smile>":
-                    self.set_emotion("<E:smile>")
+        if self.is_listening:
+            return
+        if text.strip():
+            if self.character.current_emotion != "<E:thinking>":
+                self.set_emotion("<E:thinking>")
+        else:
+            if self.character.current_emotion != "<E:smile>":
+                self.set_emotion("<E:smile>")
 
     def start_thinking(self):
         if self.is_listening: return
@@ -410,21 +412,35 @@ class MainWindow(QWidget):
         self.io.setAcceptDrops(True)
 
     def refresh_from_config(self):
-        img_rect = self.character.image_rect()
-        if img_rect.width() > 0 and img_rect.height() > 0:
-            target_w = self.config.sprite_width
-            target_h = self.config.sprite_height
-            scale_w = target_w / (img_rect.width() / self.ui_scale)
-            scale_h = target_h / (img_rect.height() / self.ui_scale)
-            new_scale = min(scale_w, scale_h)
-            self.apply_scale(new_scale)
-        self.io.set_names(self.config.username, self.config.character_name)
-        
-        self._apply_window_settings()
-        
-        self.load_thinking_texts()
-        self.load_listening_texts()
-        self.update_io_geometry()
+        try:
+            pack_id = getattr(self.config.pack_manager, "active_pack_id", "")
+            print(f"[UI] Starting refresh_from_config... pack={pack_id} outfit={self.config.default_outfit}")
+            self.character.setup(self.project_root, self.config.default_outfit)
+            self.character.set_emotion("<E:smile>", deterministic=True)
+            
+            self.io.set_names(self.config.username, self.config.character_name)
+            
+            self.load_thinking_texts()
+            self.load_listening_texts()
+            
+            self._apply_window_settings()
+            
+            img_rect = self.character.image_rect()
+            if img_rect.width() > 0 and img_rect.height() > 0:
+                target_w = self.config.sprite_width
+                target_h = self.config.sprite_height
+                scale_w = target_w / (img_rect.width() / self.ui_scale)
+                scale_h = target_h / (img_rect.height() / self.ui_scale)
+                new_scale = min(scale_w, scale_h)
+                self.apply_scale(new_scale)
+            else:
+                self.sync_window_to_sprite()
+            
+            print(f"[UI] refresh_from_config completed successfully.")
+        except Exception as e:
+            print(f"[UI] ERROR in refresh_from_config: {e}")
+            import traceback
+            traceback.print_exc()
         
     def check_idle_fade_allowed(self) -> bool:
         if self.config.always_show_ui or self.manual_hidden or self.fullscreen_hidden:
@@ -622,7 +638,9 @@ class MainWindow(QWidget):
         self._update_visibility()
         
     def manual_show(self):
-        if not self.manual_hidden:
+        controller = getattr(self, "controller", None)
+        if controller and getattr(controller, "_pack_switch_pending", False):
+            print("[UI] manual_show blocked during pack switch")
             return
         self.manual_hidden = False
         self.cancel_idle_fade()
@@ -636,7 +654,9 @@ class MainWindow(QWidget):
                 self.show()
 
     def _update_visibility(self):
-        should_hide = self.manual_hidden or self.fullscreen_hidden
+        controller = getattr(self, "controller", None)
+        pack_switch_pending = bool(controller and getattr(controller, "_pack_switch_pending", False))
+        should_hide = self.manual_hidden or self.fullscreen_hidden or pack_switch_pending
         if should_hide:
             if self.isVisible():
                 super().hide()
@@ -701,6 +721,37 @@ class MainWindow(QWidget):
             action.triggered.connect(lambda checked, o=outfit: self.safe_set_outfit(o))
             grp.addAction(action)
 
+    def _on_pack_selected(self, pack_id: str):
+        print(f"[UI] Pack menu selected: {pack_id}")
+        self.pack_changed.emit(pack_id)
+        if self._pack_change_handler_connected:
+            return
+        controller = getattr(self, "controller", None)
+        if controller and hasattr(controller, "_handle_pack_change"):
+            print("[UI] Pack handler not connected, invoking controller directly.")
+            controller._handle_pack_change(pack_id)
+        print(f"[UI] Fallback refresh scheduled for pack: {pack_id}")
+        QTimer.singleShot(2000, lambda pid=pack_id: self._fallback_refresh_after_pack_change(pid))
+
+    def _fallback_refresh_after_pack_change(self, pack_id: str):
+        try:
+            controller = getattr(self, "controller", None)
+            if controller and getattr(controller, "_pack_switch_pending", False):
+                print(f"[UI] Fallback skipped: pack switch pending for {pack_id}")
+                return
+            current_id = getattr(self.config.pack_manager, "active_pack_id", "")
+            if current_id != pack_id:
+                print(f"[UI] Fallback syncing pack_id: {current_id} -> {pack_id}")
+                self.config.pack_manager.set_active_pack(pack_id)
+                self.config.set("General", "active_pack", pack_id)
+                self.config.save()
+            self.config.load()
+            print(f"[UI] Fallback refresh_from_config... pack={pack_id} outfit={self.config.default_outfit}")
+            self.refresh_from_config()
+            self.manual_show()
+        except Exception as e:
+            print(f"[UI] Fallback refresh error: {e}")
+
     def populate_pack_menu(self, menu: QMenu):
         packs = self.config.pack_manager.get_available_packs()
         active_id = self.config.pack_manager.active_pack_id
@@ -710,7 +761,7 @@ class MainWindow(QWidget):
             action = menu.addAction(p_id)
             action.setCheckable(True)
             action.setChecked(p_id == active_id)
-            action.triggered.connect(lambda checked, pid=p_id: self.pack_changed.emit(pid))
+            action.triggered.connect(lambda checked, pid=p_id: self._on_pack_selected(pid))
             grp.addAction(action)
 
     def populate_drag_menu(self, menu: QMenu):
