@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$PYTHON_EMBED_URL = 'https://www.python.org/ftp/python/3.12.3/python-3.12.3-embed-amd64.zip'
+$PYTHON_EMBED_URL = 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip'
 $PIP_GET_URL = 'https://bootstrap.pypa.io/get-pip.py'
 $SOVITS_URL = 'https://huggingface.co/datasets/JodieRuth/test123/resolve/main/GPT-SoVITS-v2pro-20250604.zip'
 $PACK_URL = 'https://huggingface.co/datasets/JodieRuth/test1/resolve/main/Resona_Default.zip'
@@ -125,7 +125,7 @@ if ($mode -eq '3') {
         
 
         Write-Host '[Resona] Pre-installing build tools (setuptools, wheel)...'
-        $preInstallArgs = @("install", "setuptools", "wheel", "--no-warn-script-location", "--only-binary=:all:")
+        $preInstallArgs = @("install", "setuptools", "wheel", "--no-warn-script-location", "--prefer-binary")
         if ($useMirror -eq 'Y' -or $useMirror -eq 'y') {
             $preInstallArgs += @("-i", "https://pypi.tuna.tsinghua.edu.cn/simple")
         }
@@ -149,8 +149,8 @@ else {
 
 # --- 3. Requirements ---
 if (-not $skipInstall) {
-    Write-Host "[Resona] Installing dependencies using $PYTHON_EXEC ..."
-    $pipArgs = @("install", "-r", "requirements.txt", "--no-warn-script-location", "--upgrade", "--only-binary=:all:")
+    Write-Host '[Resona] Installing dependencies from requirements.txt...'
+    $pipArgs = @("install", "-r", "requirements.txt", "--no-warn-script-location", "--upgrade", "--prefer-binary")
     
     if ($useMirror -eq 'Y' -or $useMirror -eq 'y') {
         $pipArgs += @("-i", "https://pypi.tuna.tsinghua.edu.cn/simple")

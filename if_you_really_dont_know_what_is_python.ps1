@@ -4,7 +4,7 @@ $ProgressPreference = 'SilentlyContinue'
 
 # --- Configuration ---
 # Using mirrors by default for best experience
-$PYTHON_EMBED_URL = 'https://www.python.org/ftp/python/3.12.3/python-3.12.3-embed-amd64.zip'
+$PYTHON_EMBED_URL = 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip'
 $PIP_GET_URL = 'https://bootstrap.pypa.io/get-pip.py'
 $SOVITS_URL = 'https://hf-mirror.com/datasets/JodieRuth/test123/resolve/main/GPT-SoVITS-v2pro-20250604.zip'
 $PACK_URL = 'https://hf-mirror.com/datasets/JodieRuth/test1/resolve/main/Resona_Default.zip'
@@ -83,13 +83,13 @@ if (!(Test-Path 'runtime')) {
     Remove-Item 'runtime\get-pip.py'
     
     Write-Host '[Resona] Installing build tools...'
-    .\runtime\python.exe -m pip install setuptools wheel --no-warn-script-location --only-binary=:all: -i https://pypi.tuna.tsinghua.edu.cn/simple
+    .\runtime\python.exe -m pip install setuptools wheel --no-warn-script-location --prefer-binary -i https://pypi.tuna.tsinghua.edu.cn/simple
 }
 $PYTHON_EXEC = '.\runtime\python.exe'
 
 # --- 2. Dependencies ---
-Write-Host "[Resona] Installing dependencies..."
-& $PYTHON_EXEC -m pip install -r requirements.txt --no-warn-script-location --upgrade --only-binary=:all: -i https://pypi.tuna.tsinghua.edu.cn/simple
+Write-Host "[Resona] Installing requirements..."
+& $PYTHON_EXEC -m pip install -r requirements.txt --no-warn-script-location --upgrade --prefer-binary -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # --- 3. Downloads ---
 
