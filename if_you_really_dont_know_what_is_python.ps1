@@ -71,14 +71,14 @@ foreach ($gpu in $gpus) {
 if (!(Test-Path 'runtime')) {
     New-Item -ItemType Directory -Path 'runtime'
     Write-Host '[Resona] Downloading Python 3.12 runtime...'
-    Invoke-WebRequest -Uri $PYTHON_EMBED_URL -OutFile 'python_embed.zip'
+    & curl.exe -L -f $PYTHON_EMBED_URL -o python_embed.zip --retry 5 --connect-timeout 30
     Expand-Archive -Path 'python_embed.zip' -DestinationPath 'runtime' -Force
     Remove-Item 'python_embed.zip'
 
     Write-Host '[Resona] Configuring environment...'
     $pthFile = Get-Item 'runtime\python312._pth'
     (Get-Content $pthFile) -replace '#import site', 'import site' | Set-Content $pthFile
-    Invoke-WebRequest -Uri $PIP_GET_URL -OutFile 'runtime\get-pip.py'
+    & curl.exe -L -f $PIP_GET_URL -o runtime\get-pip.py --retry 5 --connect-timeout 30
     .\runtime\python.exe runtime\get-pip.py --no-warn-script-location --index-url https://pypi.tuna.tsinghua.edu.cn/simple
     Remove-Item 'runtime\get-pip.py'
     

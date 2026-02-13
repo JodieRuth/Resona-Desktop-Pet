@@ -83,12 +83,17 @@ if (-not $vc_installed) {
 
 # --- 1. Proxy Setup ---
 $useProxy = Read-Host 'Do you need a proxy for downloading? (Y/N, default is N)'
+$proxyObject = $null
 if ($useProxy -eq 'Y' -or $useProxy -eq 'y') {
     $proxyAddr = Read-Host 'Enter proxy address (e.g., 127.0.0.1)'
     $proxyPort = Read-Host 'Enter proxy port (e.g., 7890)'
     $fullProxy = "http://$($proxyAddr):$proxyPort"
     $env:HTTP_PROXY = $fullProxy
     $env:HTTPS_PROXY = $fullProxy
+    
+    # Configure PowerShell session to use this proxy for all web requests
+    $proxyObject = New-Object System.Net.WebProxy($fullProxy)
+    [System.Net.WebRequest]::DefaultWebProxy = $proxyObject
     Write-Host "[Resona] Proxy set to: $fullProxy"
 }
 
@@ -107,14 +112,20 @@ if ($mode -eq '3') {
     if (!(Test-Path 'runtime')) {
         New-Item -ItemType Directory -Path 'runtime'
         Write-Host '[Resona] Downloading Python 3.12 embedded version...'
-        Invoke-WebRequest -Uri $PYTHON_EMBED_URL -OutFile 'python_embed.zip'
+        $curlPythonArgs = @("-L", "-f", $PYTHON_EMBED_URL, "-o", "python_embed.zip", "--retry", "5", "--connect-timeout", "30")
+        if ($useProxy -eq 'Y' -or $useProxy -eq 'y') { $curlPythonArgs += @("-x", $fullProxy) }
+        & curl.exe @curlPythonArgs
+        
         Expand-Archive -Path 'python_embed.zip' -DestinationPath 'runtime' -Force
         Remove-Item 'python_embed.zip'
 
         Write-Host '[Resona] Configuring pip...'
         $pthFile = Get-Item 'runtime\python312._pth'
         (Get-Content $pthFile) -replace '#import site', 'import site' | Set-Content $pthFile
-        Invoke-WebRequest -Uri $PIP_GET_URL -OutFile 'runtime\get-pip.py'
+        
+        $curlPipArgs = @("-L", "-f", $PIP_GET_URL, "-o", "runtime\get-pip.py", "--retry", "5", "--connect-timeout", "30")
+        if ($useProxy -eq 'Y' -or $useProxy -eq 'y') { $curlPipArgs += @("-x", $fullProxy) }
+        & curl.exe @curlPipArgs
         
         $getPipArgs = @("runtime\get-pip.py", "--no-warn-script-location")
         if ($useMirror -eq 'Y' -or $useMirror -eq 'y') {
