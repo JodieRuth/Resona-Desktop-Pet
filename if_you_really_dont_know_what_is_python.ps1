@@ -60,7 +60,8 @@ if (-not $vc_installed) {
 # --- GPU Detection ---
 $gpus = Get-CimInstance Win32_VideoController
 foreach ($gpu in $gpus) {
-    if ($gpu.Name -like "*RTX 50*") {
+    $gpuName = $gpu.Name.ToUpper()
+    if ($gpuName -like "*NVIDIA*" -and $gpuName -like "*RTX 50*") {
         $SOVITS_URL = 'https://hf-mirror.com/datasets/JodieRuth/test123/resolve/main/GPT-SoVITS-v2pro-20250604-nvidia50.zip'
         Write-Host "[Resona] Detected NVIDIA 50-series GPU: $($gpu.Name). Using optimized version." -ForegroundColor Green
         break

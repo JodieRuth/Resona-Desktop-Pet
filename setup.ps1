@@ -14,7 +14,8 @@ $STT_URL = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/s
 $gpus = Get-CimInstance Win32_VideoController
 $isNvidia50 = $false
 foreach ($gpu in $gpus) {
-    if ($gpu.Name -like "*RTX 50*") {
+    $gpuName = $gpu.Name.ToUpper()
+    if ($gpuName -like "*NVIDIA*" -and $gpuName -like "*RTX 50*") {
         $isNvidia50 = $true
         $SOVITS_URL = 'https://huggingface.co/datasets/JodieRuth/test123/resolve/main/GPT-SoVITS-v2pro-20250604-nvidia50.zip'
         Write-Host "[Resona] Detected NVIDIA 50-series GPU: $($gpu.Name). Using optimized SoVITS version." -ForegroundColor Green

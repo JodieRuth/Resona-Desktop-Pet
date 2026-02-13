@@ -129,17 +129,26 @@ class ApplicationController(QObject):
                         log(f"[Main] GPU detection failed (both wmic and powershell): {ps_e}")
 
             output_up = output.upper()
-            if "AMD" in output_up or "RADEON" in output_up:
+            has_nvidia = "NVIDIA" in output_up
+            has_amd = "AMD" in output_up or "RADEON" in output_up
+
+            if has_nvidia:
+                self.gpu_vendor = "NVIDIA"
+                self.can_monitor_gpu = True
+                log("[Main] NVIDIA GPU detected. GPU monitoring enabled.")
+                if has_amd:
+                    log("[Main] Hybrid GPU system (NVIDIA + AMD) detected. Monitoring NVIDIA dGPU.")
+            elif has_amd:
                 self.gpu_vendor = "AMD"
                 self.can_monitor_gpu = False
-                log("[Main] AMD GPU detected. Disabling GPU monitoring features to prevent crashes.")
+                log("[Main] AMD GPU detected (No NVIDIA dGPU). Disabling GPU monitoring to prevent crashes.")
                 if self.config.sovits_device == "cuda":
                     log("[Main] AMD GPU detected but SoVITS device is 'cuda'. Forcing to 'cpu' for compatibility.")
                     self.config.set("SoVITS", "device", "cpu")
                     self.config.save()
-            elif "NVIDIA" in output_up:
-                self.gpu_vendor = "NVIDIA"
-                log("[Main] NVIDIA GPU detected. GPU monitoring enabled.")
+            else:
+                log("[Main] No known discrete GPU detected (Intel or Unknown). GPU monitoring disabled.")
+                self.can_monitor_gpu = False
         except Exception as e:
             log(f"[Main] GPU detection skipped or failed: {e}")
 
