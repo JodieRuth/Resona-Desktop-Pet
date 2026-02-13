@@ -438,9 +438,14 @@ class ConfigManager:
         target_val = self.prompt_file_path 
         
         if self.use_pack_settings:
-            prompts = self.pack_manager.get_info("logic", {}).get("prompts", [])
+            logic_info = self.pack_manager.get_info("logic", {})
+            prompts = logic_info.get("prompts", [])
+            
             if not prompts:
-                raise RuntimeError("CRITICAL: Active pack has no prompts defined.")
+                pack_id = self.pack_manager.active_pack_id
+                print(f"[Config] Error: No 'prompts' found in 'logic' section of pack.json for pack '{pack_id}'")
+                print(f"[Config] logic_info content: {logic_info}")
+                raise RuntimeError(f"CRITICAL: Active pack '{pack_id}' has no prompts defined in its pack.json.")
             
             target_prompt = next((p for p in prompts if p.get("id") == target_val), None)
             

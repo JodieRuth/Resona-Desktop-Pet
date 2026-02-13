@@ -1,4 +1,4 @@
-﻿import json
+import json
 import re
 from datetime import datetime
 from typing import Optional, Callable, Any, List
@@ -187,6 +187,13 @@ class LLMBackend:
                 max_tokens=max_tokens,
             )
             
+
+            if isinstance(response, str):
+                return LLMResponse(error=f"API returned an unexpected string. Please check if the Base URL is correct (Current: {self.config.get_llm_config().get('base_url')}). Error preview: {response[:100]}")
+
+            if not hasattr(response, 'choices') or not response.choices:
+                return LLMResponse(error="Abnormal API response: missing 'choices' field.")
+
             message = response.choices[0].message
             raw_text = message.content or ""
             reasoning = getattr(message, "reasoning_content", "")

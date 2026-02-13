@@ -100,23 +100,41 @@ class PackManager:
     def _load_pack_manifest(self):
         self.pack_data = {}
         manifest_path = self.packs_dir / self.active_pack_id / "pack.json"
-        print(f"[PackManager] Loading manifest: {manifest_path}")
-        if manifest_path.exists():
+        
+        if not manifest_path.exists():
+            print(f"[PackManager] CRITICAL: Manifest not found at {manifest_path}")
+            return
+
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                self.pack_data = json.load(f)
+        except UnicodeDecodeError:
             try:
-                with open(manifest_path, "r", encoding="utf-8") as f:
+                with open(manifest_path, "r", encoding="gbk") as f:
                     self.pack_data = json.load(f)
-                info = self.pack_data.get("pack_info", {})
-                character = self.pack_data.get("character", {})
-                outfits = character.get("outfits", [])
-                prompts = self.pack_data.get("logic", {}).get("prompts", [])
-                print(f"[PackManager] Manifest loaded: pack_id={info.get('id')} name={info.get('name')} character={character.get('name')} outfits={len(outfits)} prompts={len(prompts)}")
             except Exception as e:
-                print(f"[PackManager] Error loading manifest: {e}")
-        else:
-            print(f"[PackManager] Manifest not found: {manifest_path}")
+                print(f"[PackManager] CRITICAL: Failed to decode pack.json with UTF-8 or GBK: {e}")
+                return
+        except json.JSONDecodeError as e:
+            print(f"[PackManager] CRITICAL: pack.json syntax error at {manifest_path}: {e}")
+            return
+        except Exception as e:
+            print(f"[PackManager] CRITICAL: Unexpected error loading manifest: {e}")
+            return
+
+        info = self.pack_data.get("pack_info", {})
+        character = self.pack_data.get("character", {})
+        logic = self.pack_data.get("logic", {})
+        prompts = logic.get("prompts", [])
+        
+        print(f"[PackManager] Manifest loaded successfully from {self.active_pack_id}")
+        print(f"  - Pack ID: {info.get('id')}")
+        print(f"  - Character: {character.get('name')}")
+        print(f"  - Prompts defined: {len(prompts)}")
 
     def get_info(self, key: str, default: Any = None) -> Any:
-        self._load_pack_manifest()
+        if not self.pack_data:
+            self._load_pack_manifest()
 
         if key in self.pack_data:
             return self.pack_data[key]
@@ -155,16 +173,6 @@ class PackManager:
                 return p if p.is_absolute() else pack_root / rel_path
         except: pass
         return None
-
-    def get_available_emotions(self) -> list:
-        emotions_path = self.get_path("logic", "emotions")
-        if emotions_path and emotions_path.exists():
-            try:
-                with open(emotions_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    return list(data.keys())
-            except: pass
-        return []
 
     def get_available_emotions(self) -> list:
         emotions_path = self.get_path("logic", "emotions")
