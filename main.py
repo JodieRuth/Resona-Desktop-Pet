@@ -160,6 +160,9 @@ class ApplicationController(QObject):
         self._pending_triggers = []
         self._is_chain_executing = False
         self._chain_cancelled = False
+        self._current_sequence = []
+        self._current_sequence_idx = 0
+        self._current_chain_callback = None
         self._drop_tts_results = False
         self.current_weather = {}
         self.interaction_locked = False
@@ -515,6 +518,10 @@ class ApplicationController(QObject):
         
         self.config.pack_manager.set_active_pack(pack_id)
         self.config.pack_manager.load_plugins(self.config.plugins_enabled)
+        
+        if hasattr(self, 'llm_backend'):
+            log(f"[PackSwitch] Clearing conversation history for new pack: {pack_id}")
+            self.llm_backend.clear_history()
 
         pdata = self.config.pack_manager.pack_data
         character = pdata.get("character", {})
@@ -558,15 +565,20 @@ class ApplicationController(QObject):
 
         if self.config.sovits_enabled:
             def wait_for_sovits_then_show():
-                print("[PackSwitch] Restarting SoVITS and waiting for API...")
+                # 检查 SoVITS 是否已经在运行
+                if self.sovits_manager.is_running():
+                    print("[PackSwitch] SoVITS is already running, skipping restart.")
+                    # 即使不重启，也要重连 TTS 以确保加载新的表情配置
+                    self.tts_backend.reload_config()
+                    self.pack_switch_ready.emit()
+                    return
+
+                print("[PackSwitch] Starting SoVITS and waiting for API...")
                 try:
-                    self.sovits_manager.stop()
+                    # 如果没运行，则尝试启动
                     success = self.sovits_manager.start(timeout=60, kill_existing=True)
                     print(f"[PackSwitch] SoVITS start finished. Success={success}")
-                    
-                    print("[PackSwitch] Attempting to emit pack_switch_ready signal...")
                     self.pack_switch_ready.emit()
-                    print("[PackSwitch] pack_switch_ready signal emitted.")
                 except Exception as e:
                     print(f"[PackSwitch] CRITICAL ERROR in wait_for_sovits_then_show: {e}")
                     traceback.print_exc()

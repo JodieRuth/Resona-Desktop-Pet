@@ -103,6 +103,18 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
             ref_wav_path = self._resolve_ref_audio_path(emotion_config["ref_wav"])
             ref_lang = language if language else self.config.tts_language
             prompt_lang = emotion_config.get("ref_lang", "ja")
+            
+            pack_model_dir = self.config.pack_manager.get_path("models", "sovits")
+            gpt_path = None
+            sovits_path = None
+            if pack_model_dir and pack_model_dir.exists():
+                ckpt_files = list(pack_model_dir.glob("*.ckpt"))
+                pth_files = list(pack_model_dir.glob("*.pth"))
+                if ckpt_files and pth_files:
+                    gpt_path = str(sorted(ckpt_files)[0].absolute().as_posix())
+                    sovits_path = str(sorted(pth_files)[0].absolute().as_posix())
+                    log(f"[TTS] Dynamic model switch detected: {pack_model_dir.name}")
+
             log(f"[TTS] Using reference audio: {ref_wav_path} with language: {ref_lang} (Prompt: {prompt_lang})")
             output_path = os.path.join(self._temp_dir, f"output_{hash(text) & 0xffffffff}.wav")
             payload = {
@@ -117,6 +129,13 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                 "fragment_interval": float(self.config.sovits_fragment_interval),
                 "repetition_penalty": 1.35
             }
+            
+            if gpt_path and sovits_path:
+                payload["gpt_method"] = "set_gpt_weights"
+                payload["gpt_path"] = gpt_path
+                payload["sovits_method"] = "set_sovits_weights"
+                payload["sovits_path"] = sovits_path
+
             self._log_sovits_params(payload)
             log(f"[TTS] Sending request to {self.api_url}/tts")
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
