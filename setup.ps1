@@ -115,7 +115,13 @@ if ($mode -eq '3') {
         $pthFile = Get-Item 'runtime\python312._pth'
         (Get-Content $pthFile) -replace '#import site', 'import site' | Set-Content $pthFile
         Invoke-WebRequest -Uri $PIP_GET_URL -OutFile 'runtime\get-pip.py'
-        .\runtime\python.exe .\runtime\get-pip.py
+        
+        $getPipArgs = @("runtime\get-pip.py", "--no-warn-script-location")
+        if ($useMirror -eq 'Y' -or $useMirror -eq 'y') {
+            $getPipArgs += @("--index-url", "https://pypi.tuna.tsinghua.edu.cn/simple")
+        }
+        .\runtime\python.exe @getPipArgs
+        Remove-Item 'runtime\get-pip.py'
         
 
         Write-Host '[Resona] Pre-installing build tools (setuptools, wheel)...'

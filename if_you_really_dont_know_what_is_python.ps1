@@ -79,7 +79,8 @@ if (!(Test-Path 'runtime')) {
     $pthFile = Get-Item 'runtime\python312._pth'
     (Get-Content $pthFile) -replace '#import site', 'import site' | Set-Content $pthFile
     Invoke-WebRequest -Uri $PIP_GET_URL -OutFile 'runtime\get-pip.py'
-    .\runtime\python.exe .\runtime\get-pip.py
+    .\runtime\python.exe runtime\get-pip.py --no-warn-script-location --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+    Remove-Item 'runtime\get-pip.py'
     
     Write-Host '[Resona] Installing build tools...'
     .\runtime\python.exe -m pip install setuptools wheel --no-warn-script-location --only-binary=:all: -i https://pypi.tuna.tsinghua.edu.cn/simple
