@@ -119,7 +119,7 @@ if ($mode -eq '3') {
         
 
         Write-Host '[Resona] Pre-installing build tools (setuptools, wheel)...'
-        $preInstallArgs = @("install", "setuptools", "wheel", "--no-warn-script-location")
+        $preInstallArgs = @("install", "setuptools", "wheel", "--no-warn-script-location", "--only-binary=:all:")
         if ($useMirror -eq 'Y' -or $useMirror -eq 'y') {
             $preInstallArgs += @("-i", "https://pypi.tuna.tsinghua.edu.cn/simple")
         }
@@ -144,7 +144,7 @@ else {
 # --- 3. Requirements ---
 if (-not $skipInstall) {
     Write-Host "[Resona] Installing dependencies using $PYTHON_EXEC ..."
-    $pipArgs = @("install", "-r", "requirements.txt", "--no-warn-script-location", "--upgrade")
+    $pipArgs = @("install", "-r", "requirements.txt", "--no-warn-script-location", "--upgrade", "--only-binary=:all:")
     
     if ($useMirror -eq 'Y' -or $useMirror -eq 'y') {
         $pipArgs += @("-i", "https://pypi.tuna.tsinghua.edu.cn/simple")

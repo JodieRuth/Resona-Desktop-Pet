@@ -82,13 +82,13 @@ if (!(Test-Path 'runtime')) {
     .\runtime\python.exe .\runtime\get-pip.py
     
     Write-Host '[Resona] Installing build tools...'
-    .\runtime\python.exe -m pip install setuptools wheel --no-warn-script-location -i https://pypi.tuna.tsinghua.edu.cn/simple
+    .\runtime\python.exe -m pip install setuptools wheel --no-warn-script-location --only-binary=:all: -i https://pypi.tuna.tsinghua.edu.cn/simple
 }
 $PYTHON_EXEC = '.\runtime\python.exe'
 
 # --- 2. Dependencies ---
 Write-Host "[Resona] Installing dependencies..."
-& $PYTHON_EXEC -m pip install -r requirements.txt --no-warn-script-location --upgrade -i https://pypi.tuna.tsinghua.edu.cn/simple
+& $PYTHON_EXEC -m pip install -r requirements.txt --no-warn-script-location --upgrade --only-binary=:all: -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # --- 3. Downloads ---
 
