@@ -16,6 +16,7 @@ Please obtain resource packs compatible with this program on your own.
 - **Performance**: TTS speed depends on your inference hardware, while LLM response speed depends on your network quality.
 - **Voice Tuning**: If you are unsatisfied with the default voice quality, you can replace the reference audio and annotation text pointed to in `emotion.json` within your resource pack.
 - **Language Matching**: It is recommended to keep the model training language, reference audio language, and the `text_tts` output from the LLM consistent. Currently only tested for **Chinese (zh)** and **Japanese (ja)**.
+- **Privacy Warning (OCR)**: If OCR (Optical Character Recognition) features are enabled, screen content may be sent to third-party services. Please use with caution to avoid leaking sensitive information. Users are solely responsible for any consequences arising from the use of this feature.
 
 ## 🙏 Acknowledgements & Notes
 

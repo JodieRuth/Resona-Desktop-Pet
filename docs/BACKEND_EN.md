@@ -11,6 +11,7 @@ Handles communication with various LLM APIs.
   - `query_claude`: Supports Anthropic Claude.
 - **Thinking Process Support**: Extracts and logs `<think>` tag content from models like R1 and Claude.
 - **Automatic Parsing**: Robustly parses LLM JSON responses into `LLMResponse` objects (emotion, display text, TTS text).
+- **OCR Context (Optional)**: Provides screen text recognition and prompt injection for environmental awareness. Enabling this feature will send screen content to third-party OCR services, potentially including sensitive information. Users assume all risks associated with this feature.
 
 ## 2. TTS Module (`tts_backend.py`)
 Converts text to speech.

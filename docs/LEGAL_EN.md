@@ -59,6 +59,7 @@ The following actions remain strictly subject to CC BY-NC-SA 4.0 and require sep
 ## 4. Privacy and Security
 - **Privacy Protection**: This project does not upload any of your personal information. It only connects to the internet when specific items in the configuration file are enabled, and the communication process is transparent in the logs.
 - **Data Security**: Since this project involves file reading/writing and system calls, please back up important data before use.
+- **OCR Privacy Warning**: If OCR features are enabled, screen content may be sent to third-party services. This can lead to the leakage of sensitive or personal information. Users are solely responsible for any privacy breaches or legal consequences resulting from the use of OCR features. The author assumes no liability for data security in this context.
 
 ## 5. External Links and Third-Party Services
 - **External Servers**: Users must find and configure external resource packs that comply with this project's interface specifications. Paths provided in example scripts are for technical demonstration only. This repository does not assume any auditing obligation for the availability or legality of content on external servers.

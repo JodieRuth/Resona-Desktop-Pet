@@ -23,7 +23,11 @@ Follow these steps to get your ResonaDesktopPet up and running in minutes.
    - `model_type`: Select 1 (DeepSeek/OpenAI), 5 (Gemini), or 3 (Claude).
    - `api_key`: Enter your API Key.
    - `base_url`: Enter the API endpoint if using DeepSeek or a proxy (e.g., `https://api.deepseek.com`).
-3. **SoVITS Config**:
+3. **OCR Config (Optional)**:
+   - `enabled`: Set to `true` to enable screen recognition context.
+   - `provider`: Select `tencent` or `baidu`.
+   - **Warning**: Enabling OCR will send screen captures to third-party services. This may lead to privacy leaks. Use at your own risk.
+4. **SoVITS Config**:
    - Ensure you have extracted the SoVITS integrated package to the correct path as per the README.
    - Set `sovits_enabled = true`.
 

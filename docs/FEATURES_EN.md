@@ -6,6 +6,7 @@ ResonaDesktopPet is more than just a desktop ornament; it is a deep interaction 
 - **Multi-Model Support**: Supports various LLMs including OpenAI (DeepSeek/GPT-4), Google Gemini, and Anthropic Claude.
 - **Persistent Memory**: Features comprehensive conversation history management for coherent, context-aware dialogues.
 - **Context Awareness**: The LLM accesses real-time context such as date and time to provide smarter responses.
+- **OCR Context (Optional)**: Can recognize text on your screen and inject it into the prompt for enhanced environment awareness. **Warning**: This feature sends screen captures to third-party OCR services, which may lead to privacy leaks. Users use this feature at their own risk.
 
 ## 2. Full Voice Interaction
 - **High-Quality TTS**: Integrates the GPT-SoVITS inference engine, supporting multiple emotional expressions for natural and vivid speech.
