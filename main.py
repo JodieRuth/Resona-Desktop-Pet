@@ -34,18 +34,26 @@ import logging
 def setup_dedicated_logger(name, file_path, level=logging.INFO):
     logger = logging.getLogger(name)
     logger.setLevel(level)
-    handler = logging.FileHandler(file_path, encoding="utf-8")
-    handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-    logger.addHandler(handler)
+    if not logger.handlers:
+        handler = logging.FileHandler(file_path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        logger.addHandler(handler)
     logger.propagate = False
     return logger
+
+def get_sovits_logger():
+    return setup_dedicated_logger("SoVITS", sovits_log_file)
+
+def get_llm_logger():
+    return setup_dedicated_logger("LLM", llm_log_file)
+
 def exception_hook(exctype, value, tb):
     traceback.print_exception(exctype, value, tb)
     logging.error("Uncaught exception:", exc_info=(exctype, value, tb))
 
 sys.excepthook = exception_hook
-sovits_logger = setup_dedicated_logger("SoVITS", sovits_log_file)
-llm_logger = setup_dedicated_logger("LLM", llm_log_file)
+# sovits_logger = setup_dedicated_logger("SoVITS", sovits_log_file)
+# llm_logger = setup_dedicated_logger("LLM", llm_log_file)
 class TeeLogger:
     def __init__(self, filename, terminal):
         self.terminal = terminal
@@ -294,8 +302,16 @@ class ApplicationController(QObject):
         self.main_window.start_thinking()
         asyncio.run_coroutine_threadsafe(self._query_llm(text), self._loop)
     async def _query_llm(self, text: str):
-        response = await self.llm_backend.query(text)
-        self.llm_response_ready.emit(response)
+        get_llm_logger()
+        
+        try:
+            response = await self.llm_backend.query(text)
+            self.llm_response_ready.emit(response)
+        except Exception as e:
+            log(f"[Main] LLM query failed: {e}")
+            from resona_desktop_pet.backend.llm_backend import LLMResponse
+            self.llm_response_ready.emit(LLMResponse(error=str(e)))
+
     def _handle_llm_response(self, response):
         self._last_llm_response = response
         log(f"[Main] LLM response returned. Error={response.error}")
@@ -355,6 +371,8 @@ class ApplicationController(QObject):
             log("[Main] No audio source available, showing text response with timeout.")
             self.main_window.show_behavior_response_with_timeout(text, emotion)
     async def _generate_tts(self, text: str, emotion: str, language: Optional[str] = None):
+        get_sovits_logger()
+
         if not language and self.config.use_pack_settings:
             language = self.config.pack_manager.get_info("tts_language", "ja")
 
@@ -416,6 +434,9 @@ class ApplicationController(QObject):
         except Exception:
             pass
     def _execute_actions_chain(self, actions):
+        if self.config.action_bring_to_front and not self.config.always_on_top:
+            self.main_window.manual_show()
+
         self._is_chain_executing = True
         self._chain_cancelled = False
         self._current_sequence = actions
@@ -574,17 +595,14 @@ class ApplicationController(QObject):
 
         if self.config.sovits_enabled:
             def wait_for_sovits_then_show():
-                # 检查 SoVITS 是否已经在运行
                 if self.sovits_manager.is_running():
                     print("[PackSwitch] SoVITS is already running, skipping restart.")
-                    # 即使不重启，也要重连 TTS 以确保加载新的表情配置
                     self.tts_backend.reload_config()
                     self.pack_switch_ready.emit()
                     return
 
                 print("[PackSwitch] Starting SoVITS and waiting for API...")
                 try:
-                    # 如果没运行，则尝试启动
                     success = self.sovits_manager.start(timeout=60, kill_existing=True)
                     print(f"[PackSwitch] SoVITS start finished. Success={success}")
                     self.pack_switch_ready.emit()
@@ -753,8 +771,28 @@ def is_admin():
     try: return ctypes.windll.shell32.IsUserAnAdmin()
     except: return False
 def run_as_admin():
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), str(project_root), 1)
+    args = sys.argv[:]
+    if "--log-file" not in args:
+        args.extend(["--log-file", str(log_file)])
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(args), str(project_root), 1)
+
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--log-file", type=str, default=None)
+    args, unknown = parser.parse_known_args()
+
+    global log_file, sovits_log_file, llm_log_file
+    if args.log_file:
+        log_file = Path(args.log_file)
+        ts_part = log_file.stem.replace("app_", "")
+        sovits_log_file = log_dir / f"sovits_{ts_part}.log"
+        llm_log_file = log_dir / f"llm_{ts_part}.log"
+        
+    sys.stdout = TeeLogger(log_file, sys.stdout)
+    sys.stderr = sys.stdout
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s', handlers=[logging.StreamHandler(sys.stdout)], force=True)
+
     config = ConfigManager(str(project_root / "config.cfg"))
     needs_admin = False
     trigger_path = config.pack_manager.get_path("logic", "triggers")

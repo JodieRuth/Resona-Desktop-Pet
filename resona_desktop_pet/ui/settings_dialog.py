@@ -199,6 +199,12 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(history_group)
 
+        behavior_group = QGroupBox("Behavior")
+        behavior_layout = QFormLayout(behavior_group)
+        self.action_bring_to_front_check = QCheckBox("Bring to front on action")
+        behavior_layout.addRow(self.action_bring_to_front_check)
+        layout.addWidget(behavior_group)
+
         layout.addStretch()
         return widget
 
@@ -378,6 +384,7 @@ class SettingsDialog(QDialog):
         self.thinking_switch_time_spin.setValue(self.config.thinking_text_switch_time)
         self.max_rounds_spin.setValue(self.config.max_rounds)
         self.time_context_check.setChecked(self.config.enable_time_context)
+        self.action_bring_to_front_check.setChecked(self.config.action_bring_to_front)
 
 
         self.model_select_combo.setCurrentIndex(self.config.model_select - 1)
@@ -448,7 +455,7 @@ class SettingsDialog(QDialog):
             self.config.set("General", "ThinkingTextSwitchTime", str(self.thinking_switch_time_spin.value()))
             self.config.set("History", "max_rounds", str(self.max_rounds_spin.value()))
             self.config.set("Time", "enable_time_context", "1" if self.time_context_check.isChecked() else "0")
-
+            self.config.set("Behavior", "action_bring_to_front", str(self.action_bring_to_front_check.isChecked()).lower())
 
             self.config.set("General", "model_select", str(self.model_select_combo.currentIndex() + 1))
             self.config.set("General", "llm_mode", self.llm_mode_combo.currentText())

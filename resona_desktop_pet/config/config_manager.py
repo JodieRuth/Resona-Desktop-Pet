@@ -261,6 +261,10 @@ class ConfigManager:
         return self.getboolean("General", "always_on_top", False)
 
     @property
+    def action_bring_to_front(self) -> bool:
+        return self.getboolean("Behavior", "action_bring_to_front", True)
+
+    @property
     def behavior_text_read_multiplier(self) -> float:
         return self.getfloat("Behavior", "behavior_text_read_multiplier", 1.5)
 

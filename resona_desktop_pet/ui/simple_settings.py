@@ -37,6 +37,9 @@ class SimpleSettingsDialog(QDialog):
         self._add_bool("General", "always_on_top", "Always on Top", "If checked, the pet will stay above other windows.")
         self._add_text("General", "global_show_hotkey", "Show Hotkey", "Global hotkey to show/focus the pet (e.g. ctrl+alt+0).")
         
+        self._add_section("Behavior Settings")
+        self._add_bool("Behavior", "action_bring_to_front", "Action Bring to Front", "Bring the pet to front whenever an action is triggered (ignored if Always on Top is enabled).")
+
         self._add_section("Window & UI Size")
         self._add_text("General", "width", "Window Width", "Main window sprite width.")
         self._add_text("General", "height", "Window Height", "Main window sprite height.")
