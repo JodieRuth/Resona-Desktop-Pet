@@ -35,7 +35,7 @@ TRANSLATIONS = {
     "time_range": {"label": "时间段(HH:MM-HH:MM)", "fields": ["range"]},
     "process_uptime": {"label": "进程存活时间(s)", "fields": ["pname", "gt", "lt", "log"]},
     "battery_level": {"label": "电池电量(%)", "fields": ["gt", "lt", "charging", "log"]},
-    "file_drop": {"label": "文件拖入检测", "fields": ["exts", "name_keywords", "log"]},
+    "file_drop": {"label": "文件拖入检测(暂不可用)", "fields": ["exts", "name_keywords", "log"]},
     "speak": {"label": "语音台词", "fields": ["text", "emotion", "voice_file"]},
     "delay": {"label": "延迟等待", "fields": ["sec"]},
     "move_to": {"label": "移动位置", "fields": ["pos"]},
