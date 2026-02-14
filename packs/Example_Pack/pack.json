@@ -8,7 +8,7 @@
     },
     "character": {
         "name": "示例角色",
-        "username_default": "主人",
+        "username_default": "user",
         "tts_language": "zh",
         "outfits": [
             {
