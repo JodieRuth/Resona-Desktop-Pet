@@ -333,6 +333,15 @@ class ApplicationController(QObject):
         if voice_file:
             pack_audio_path = self.config.pack_manager.get_path("audio", "event_dir")
             v_path = (pack_audio_path / voice_file) if pack_audio_path else Path(voice_file)
+            
+            if not v_path.exists() and pack_audio_path and pack_audio_path.exists():
+                search_name = Path(voice_file).name
+                log(f"[Main] Direct path not found: {v_path}. Searching for '{search_name}' in {pack_audio_path}...")
+                matches = list(pack_audio_path.rglob(search_name))
+                if matches:
+                    v_path = matches[0]
+                    log(f"[Main] Found match via recursive search: {v_path}")
+        
         if v_path and v_path.exists():
             log(f"[Main] Playing pre-recorded: {v_path}")
             self.main_window.set_speaking(True)

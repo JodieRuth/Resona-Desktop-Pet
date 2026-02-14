@@ -47,7 +47,7 @@ class CharacterView(QWidget):
             print(f"[CharacterView] Error resolving outfit id: {e}")
         return requested
         
-    def _get_outfit_path(self, outfit: str) -> Path:
+    def _get_outfit_path(self, outfit: str, verbose: bool = False) -> Path:
         if not self.project_root: return Path(".")
         try:
             config = getattr(self.parent(), "config", None)
@@ -62,14 +62,14 @@ class CharacterView(QWidget):
                     if rel_path:
                         candidate = Path(rel_path)
                         outfit_path = candidate if candidate.is_absolute() else pack_root / rel_path
-                        print(f"[CharacterView] Checking pack outfit path: {outfit_path}")
+                        if verbose: print(f"[CharacterView] Checking pack outfit path: {outfit_path}")
                         if outfit_path.exists() and (outfit_path / "sum.json").exists():
-                            print(f"[CharacterView] Using pack outfit path: {outfit_path}")
+                            if verbose: print(f"[CharacterView] Using pack outfit path: {outfit_path}")
                             return outfit_path
                 pack_outfit_path = pack_root / "assets" / "sprites" / outfit
-                print(f"[CharacterView] Checking pack outfit path: {pack_outfit_path}")
+                if verbose: print(f"[CharacterView] Checking pack outfit path: {pack_outfit_path}")
                 if pack_outfit_path.exists() and (pack_outfit_path / "sum.json").exists():
-                    print(f"[CharacterView] Using pack outfit path: {pack_outfit_path}")
+                    if verbose: print(f"[CharacterView] Using pack outfit path: {pack_outfit_path}")
                     return pack_outfit_path
         except Exception as e:
             print(f"[CharacterView] Error resolving outfit path: {e}")
@@ -108,7 +108,7 @@ class CharacterView(QWidget):
 
     def _load_outfit(self, outfit: str) -> bool:
         resolved = self._resolve_pack_outfit(outfit)
-        outfit_path = self._get_outfit_path(resolved)
+        outfit_path = self._get_outfit_path(resolved, verbose=True)
         print(f"[CharacterView] Loading outfit from: {outfit_path}")
         sum_json = outfit_path / "sum.json"
         if not sum_json.exists(): return False
