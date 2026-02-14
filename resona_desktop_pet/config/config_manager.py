@@ -314,7 +314,9 @@ class ConfigManager:
             print(f"[{section}]")
             for key, val in self.config.items(section):
 
-                display_val = "********" if "api_key" in key.lower() or "password" in key.lower() else val
+                key_lower = key.lower()
+                masked = any(token in key_lower for token in ["api_key", "secret", "token", "password"])
+                display_val = "********" if masked else val
                 print(f"  {key} = {display_val}")
         print("="*63 + "\n")
 
@@ -346,6 +348,64 @@ class ConfigManager:
     @property
     def stt_language(self) -> str:
         return self.get("STT", "language", "auto")
+
+    @property
+    def ocr_enabled(self) -> bool:
+        return self.getboolean("OCR", "enabled", False)
+
+    @property
+    def ocr_provider(self) -> str:
+        return self.get("OCR", "provider", "tencent").lower()
+
+    @property
+    def ocr_include_process_list(self) -> bool:
+        return self.getboolean("OCR", "include_process_list", False)
+
+    @property
+    def ocr_sentence_limit(self) -> int:
+        return self.getint("OCR", "sentence_limit", 4)
+
+    @property
+    def ocr_baidu_api_key(self) -> str:
+        return self.get("OCR", "baidu_api_key", "")
+
+    @property
+    def ocr_baidu_secret_key(self) -> str:
+        return self.get("OCR", "baidu_secret_key", "")
+
+    @property
+    def ocr_tencent_secret_id(self) -> str:
+        return self.get("OCR", "tencent_secret_id", "")
+
+    @property
+    def ocr_tencent_secret_key(self) -> str:
+        return self.get("OCR", "tencent_secret_key", "")
+
+    def get_ocr_config(self) -> dict:
+        enabled = self.ocr_enabled
+        provider = self.ocr_provider
+        include_process_list = self.ocr_include_process_list
+        sentence_limit = self.ocr_sentence_limit
+        config = {
+            "enabled": enabled,
+            "provider": provider,
+            "include_process_list": include_process_list,
+            "sentence_limit": sentence_limit
+        }
+
+        if not enabled:
+            return config
+
+        if provider == "baidu":
+            config["api_key"] = self.get_required("OCR", "baidu_api_key")
+            config["secret_key"] = self.get_required("OCR", "baidu_secret_key")
+        elif provider == "tencent":
+            config["secret_id"] = self.get_required("OCR", "tencent_secret_id")
+            config["secret_key"] = self.get_required("OCR", "tencent_secret_key")
+        else:
+            raise RuntimeError(f"CRITICAL CONFIG ERROR: Unsupported OCR provider '{provider}'.")
+
+        return config
 
 
     @property
@@ -436,6 +496,10 @@ class ConfigManager:
         if self.use_pack_settings:
              return self.get("Prompt", "file_path", "")
         return self.get_required("Prompt", "file_path")
+
+    @property
+    def enable_ip_context(self) -> bool:
+        return self.getboolean("Prompt", "enable_ip_context", True)
 
     def get_prompt(self) -> str:
         

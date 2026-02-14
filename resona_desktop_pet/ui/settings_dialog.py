@@ -113,6 +113,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._create_llm_tab(), "LLM")
         tabs.addTab(self._create_tts_tab(), "TTS")
         tabs.addTab(self._create_stt_tab(), "STT")
+        tabs.addTab(self._create_ocr_tab(), "OCR")
         layout.addWidget(tabs)
 
 
@@ -196,6 +197,9 @@ class SettingsDialog(QDialog):
 
         self.time_context_check = QCheckBox("Include time context")
         history_layout.addRow(self.time_context_check)
+
+        self.ip_context_check = QCheckBox("Include user IP/Location")
+        history_layout.addRow(self.ip_context_check)
 
         layout.addWidget(history_group)
 
@@ -371,6 +375,56 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         return widget
 
+    def _create_ocr_tab(self) -> QWidget:
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        self.ocr_enabled_check = QCheckBox("Enable OCR")
+        layout.addWidget(self.ocr_enabled_check)
+
+        ocr_group = QGroupBox("OCR Configuration")
+        ocr_layout = QFormLayout(ocr_group)
+
+        self.ocr_provider_combo = QComboBox()
+        self.ocr_provider_combo.addItems(["tencent", "baidu"])
+        ocr_layout.addRow("Provider:", self.ocr_provider_combo)
+
+        self.ocr_include_process_check = QCheckBox("Include process names and window titles")
+        ocr_layout.addRow(self.ocr_include_process_check)
+
+        self.ocr_sentence_limit_spin = QSpinBox()
+        self.ocr_sentence_limit_spin.setRange(0, 20)
+        self.ocr_sentence_limit_spin.setToolTip("0 to disable the limit note")
+        ocr_layout.addRow("Response Sentence Limit:", self.ocr_sentence_limit_spin)
+
+        self.ocr_baidu_api_key_edit = QLineEdit()
+        self.ocr_baidu_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ocr_baidu_api_key_label = QLabel("Baidu API Key:")
+        ocr_layout.addRow(self.ocr_baidu_api_key_label, self.ocr_baidu_api_key_edit)
+
+        self.ocr_baidu_secret_key_edit = QLineEdit()
+        self.ocr_baidu_secret_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ocr_baidu_secret_key_label = QLabel("Baidu Secret Key:")
+        ocr_layout.addRow(self.ocr_baidu_secret_key_label, self.ocr_baidu_secret_key_edit)
+
+        self.ocr_tencent_secret_id_edit = QLineEdit()
+        self.ocr_tencent_secret_id_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ocr_tencent_secret_id_label = QLabel("Tencent Secret ID:")
+        ocr_layout.addRow(self.ocr_tencent_secret_id_label, self.ocr_tencent_secret_id_edit)
+
+        self.ocr_tencent_secret_key_edit = QLineEdit()
+        self.ocr_tencent_secret_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ocr_tencent_secret_key_label = QLabel("Tencent Secret Key:")
+        ocr_layout.addRow(self.ocr_tencent_secret_key_label, self.ocr_tencent_secret_key_edit)
+
+        self.ocr_provider_combo.currentIndexChanged.connect(self._on_ocr_provider_changed)
+        self._update_ocr_provider_fields()
+
+        layout.addWidget(ocr_group)
+        layout.addStretch()
+        return widget
+
     def _load_settings(self):
 
 
@@ -384,6 +438,7 @@ class SettingsDialog(QDialog):
         self.thinking_switch_time_spin.setValue(self.config.thinking_text_switch_time)
         self.max_rounds_spin.setValue(self.config.max_rounds)
         self.time_context_check.setChecked(self.config.enable_time_context)
+        self.ip_context_check.setChecked(self.config.enable_ip_context)
         self.action_bring_to_front_check.setChecked(self.config.action_bring_to_front)
 
 
@@ -408,6 +463,16 @@ class SettingsDialog(QDialog):
         self.stt_silence_spin.setValue(self.config.stt_silence_threshold)
         self.stt_max_duration_spin.setValue(self.config.stt_max_duration)
         self.stt_model_dir_edit.setText(self.config.stt_model_dir)
+
+        self.ocr_enabled_check.setChecked(self.config.ocr_enabled)
+        self.ocr_provider_combo.setCurrentText(self.config.ocr_provider)
+        self.ocr_include_process_check.setChecked(self.config.ocr_include_process_list)
+        self.ocr_sentence_limit_spin.setValue(self.config.ocr_sentence_limit)
+        self.ocr_baidu_api_key_edit.setText(self.config.ocr_baidu_api_key)
+        self.ocr_baidu_secret_key_edit.setText(self.config.ocr_baidu_secret_key)
+        self.ocr_tencent_secret_id_edit.setText(self.config.ocr_tencent_secret_id)
+        self.ocr_tencent_secret_key_edit.setText(self.config.ocr_tencent_secret_key)
+        self._update_ocr_provider_fields()
 
     def _load_llm_config(self):
 
@@ -441,6 +506,34 @@ class SettingsDialog(QDialog):
             self.config.set(section, "base_url", self.base_url_edit.text())
             self.config.set(section, "model_name", self.model_name_edit.text())
 
+    def _save_current_ocr_config(self):
+        self.config.set("OCR", "provider", self.ocr_provider_combo.currentText())
+        self.config.set("OCR", "include_process_list", str(self.ocr_include_process_check.isChecked()).lower())
+        self.config.set("OCR", "sentence_limit", str(self.ocr_sentence_limit_spin.value()))
+        self.config.set("OCR", "baidu_api_key", self.ocr_baidu_api_key_edit.text())
+        self.config.set("OCR", "baidu_secret_key", self.ocr_baidu_secret_key_edit.text())
+        self.config.set("OCR", "tencent_secret_id", self.ocr_tencent_secret_id_edit.text())
+        self.config.set("OCR", "tencent_secret_key", self.ocr_tencent_secret_key_edit.text())
+
+    def _on_ocr_provider_changed(self):
+        self._save_current_ocr_config()
+        self._update_ocr_provider_fields()
+
+    def _update_ocr_provider_fields(self):
+        provider = self.ocr_provider_combo.currentText()
+        baidu_visible = provider == "baidu"
+        tencent_visible = provider == "tencent"
+
+        self.ocr_baidu_api_key_label.setVisible(baidu_visible)
+        self.ocr_baidu_api_key_edit.setVisible(baidu_visible)
+        self.ocr_baidu_secret_key_label.setVisible(baidu_visible)
+        self.ocr_baidu_secret_key_edit.setVisible(baidu_visible)
+
+        self.ocr_tencent_secret_id_label.setVisible(tencent_visible)
+        self.ocr_tencent_secret_id_edit.setVisible(tencent_visible)
+        self.ocr_tencent_secret_key_label.setVisible(tencent_visible)
+        self.ocr_tencent_secret_key_edit.setVisible(tencent_visible)
+
     def _save_settings(self):
 
         try:
@@ -455,6 +548,7 @@ class SettingsDialog(QDialog):
             self.config.set("General", "ThinkingTextSwitchTime", str(self.thinking_switch_time_spin.value()))
             self.config.set("History", "max_rounds", str(self.max_rounds_spin.value()))
             self.config.set("Time", "enable_time_context", "1" if self.time_context_check.isChecked() else "0")
+            self.config.set("Prompt", "enable_ip_context", str(self.ip_context_check.isChecked()).lower())
             self.config.set("Behavior", "action_bring_to_front", str(self.action_bring_to_front_check.isChecked()).lower())
 
             self.config.set("General", "model_select", str(self.model_select_combo.currentIndex() + 1))
@@ -478,6 +572,15 @@ class SettingsDialog(QDialog):
             self.config.set("STT", "silence_threshold", str(self.stt_silence_spin.value()))
             self.config.set("STT", "max_duration", str(self.stt_max_duration_spin.value()))
             self.config.set("STT", "model_dir", self.stt_model_dir_edit.text())
+
+            self.config.set("OCR", "enabled", str(self.ocr_enabled_check.isChecked()).lower())
+            self.config.set("OCR", "provider", self.ocr_provider_combo.currentText())
+            self.config.set("OCR", "include_process_list", str(self.ocr_include_process_check.isChecked()).lower())
+            self.config.set("OCR", "sentence_limit", str(self.ocr_sentence_limit_spin.value()))
+            self.config.set("OCR", "baidu_api_key", self.ocr_baidu_api_key_edit.text())
+            self.config.set("OCR", "baidu_secret_key", self.ocr_baidu_secret_key_edit.text())
+            self.config.set("OCR", "tencent_secret_id", self.ocr_tencent_secret_id_edit.text())
+            self.config.set("OCR", "tencent_secret_key", self.ocr_tencent_secret_key_edit.text())
 
 
             self.config.save()

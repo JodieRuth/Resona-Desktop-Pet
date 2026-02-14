@@ -22,3 +22,5 @@ python-multipart>=0.0.9
 qasync>=0.27.0
 soundfile>=0.12.1
 PyYAML>=6.0.1
+tencentcloud-sdk-python-common>=3.0.0
+tencentcloud-sdk-python-ocr>=3.0.0

@@ -1,9 +1,20 @@
 import json
 import re
+import asyncio
+import base64
+import io
 from datetime import datetime
 from typing import Optional, Callable, Any, List
 from pathlib import Path
 from dataclasses import dataclass, field
+
+import requests
+import psutil
+import win32con
+import win32gui
+import win32api
+import win32process
+from PIL import ImageGrab
 
 from ..config import ConfigManager
 
@@ -50,8 +61,37 @@ class LLMBackend:
         self._claude_client = None
         self._gemini_safety = {}
         self._active_model_name = None
+        self._ocr_last_text = None
+        self._ocr_same_count = 0
+        self._ocr_disabled = False
+        self._ip_context = None
+
+        if self.config.ocr_enabled:
+            self.config.get_ocr_config()
+        
+        if self.config.enable_ip_context:
+            import threading
+            threading.Thread(target=self._fetch_ip_context_sync, daemon=True).start()
         
         self.reconnect()
+
+    def _fetch_ip_context_sync(self):
+        try:
+            response = requests.get("http://ip-api.com/json/?lang=zh-CN", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("status") == "success":
+                    ip = data.get("query")
+                    country = data.get("country")
+                    region = data.get("regionName")
+                    city = data.get("city")
+                    isp = data.get("isp")
+                    self._ip_context = f"{ip} ({country}, {region}, {city}, ISP: {isp})"
+                    print(f"[LLM] IP Context initialized: {self._ip_context}")
+                else:
+                    print(f"[LLM] IP-API error: {data.get('message')}")
+        except Exception as e:
+            print(f"[LLM] Failed to fetch IP context: {e}")
 
     def reconnect(self):
         llm_cfg = self.config.get_llm_config()
@@ -106,23 +146,148 @@ class LLMBackend:
         
         return f"{time_str} ({weekday}, {period})"
 
-    def _build_messages(self, question: str) -> list:
+    def _build_messages(self, question: str, extra_context: Optional[str] = None) -> list:
         messages = []
         system_prompt = self.config.get_prompt()
         
         messages.append({"role": "system", "content": system_prompt})
 
-        processed_question = question
+        question_blocks = []
         if self.config.enable_time_context:
             time_info = self._get_precise_time_context()
-            processed_question = f"[Local Time: {time_info}]\n{question}"
+            question_blocks.append(f"[Local Time: {time_info}]")
+        if self.config.enable_ip_context and self._ip_context:
+            question_blocks.append(f"[User IP: {self._ip_context}]")
+        sentence_limit = self.config.ocr_sentence_limit
+        if sentence_limit > 0:
+            question_blocks.append(f"Note: Keep your response under {sentence_limit} sentences and maintain your persona.")
+        question_blocks.append(question)
+        processed_question = "\n".join(question_blocks)
 
         raw_history = self.history.get_messages()
         for msg in raw_history:
             messages.append({"role": msg["role"], "content": msg["content"]})
 
+        if extra_context:
+            messages.append({"role": "user", "content": extra_context})
+
         messages.append({"role": "user", "content": processed_question})
         return messages
+
+    def _get_visible_processes_on_active_monitor(self) -> list:
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            return []
+        active_monitor = win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTONEAREST)
+        results = []
+
+        def enum_callback(handle, acc):
+            if not win32gui.IsWindowVisible(handle):
+                return
+            title = win32gui.GetWindowText(handle)
+            if not title:
+                return
+            monitor = win32api.MonitorFromWindow(handle, win32con.MONITOR_DEFAULTTONULL)
+            if monitor != active_monitor:
+                return
+            _, pid = win32process.GetWindowThreadProcessId(handle)
+            try:
+                proc_name = psutil.Process(pid).name()
+            except Exception:
+                proc_name = "unknown"
+            acc.append(f"{proc_name} | {title}")
+
+        win32gui.EnumWindows(enum_callback, results)
+        return sorted(set(results))
+
+    def _prepare_image_base64(self) -> str:
+        screenshot = ImageGrab.grab()
+        img_byte_arr = io.BytesIO()
+        screenshot.save(img_byte_arr, format="PNG")
+        return base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
+
+    def _baidu_ocr(self, image_base64: str, api_key: str, secret_key: str) -> str:
+        session = requests.Session()
+        session.trust_env = False
+        token_url = f"https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={api_key}&client_secret={secret_key}"
+        token_resp = session.get(token_url, timeout=10)
+        if token_resp.status_code != 200:
+            raise RuntimeError(token_resp.text)
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            raise RuntimeError(token_resp.text)
+        request_url = "https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic"
+        params = {"image": image_base64}
+        headers = {"content-type": "application/x-www-form-urlencoded"}
+        ocr_resp = session.post(f"{request_url}?access_token={access_token}", data=params, headers=headers, timeout=15)
+        if ocr_resp.status_code != 200:
+            raise RuntimeError(ocr_resp.text)
+        ocr_data = ocr_resp.json()
+        words = [item.get("words", "") for item in ocr_data.get("words_result", [])]
+        return "\n".join([w for w in words if w])
+
+    def _tencent_ocr(self, image_base64: str, secret_id: str, secret_key: str) -> str:
+        try:
+            from tencentcloud.common import credential
+            from tencentcloud.ocr.v20181119 import ocr_client, models
+        except Exception as e:
+            raise RuntimeError(f"Tencent OCR SDK not available: {e}")
+        cred = credential.Credential(secret_id, secret_key)
+        client = ocr_client.OcrClient(cred, "ap-shanghai")
+        req = models.GeneralBasicOCRRequest()
+        req.ImageBase64 = image_base64
+        resp = client.GeneralBasicOCR(req)
+        detections = resp.TextDetections or []
+        texts = [item.DetectedText for item in detections if getattr(item, "DetectedText", None)]
+        return "\n".join(texts)
+
+    def _run_ocr(self, ocr_config: dict) -> str:
+        image_base64 = self._prepare_image_base64()
+        provider = ocr_config.get("provider")
+        if provider == "baidu":
+            return self._baidu_ocr(image_base64, ocr_config["api_key"], ocr_config["secret_key"])
+        if provider == "tencent":
+            return self._tencent_ocr(image_base64, ocr_config["secret_id"], ocr_config["secret_key"])
+        raise RuntimeError(f"Unsupported OCR provider: {provider}")
+
+    async def _get_ocr_context(self) -> Optional[str]:
+        ocr_config = self.config.get_ocr_config()
+        ocr_active = ocr_config.get("enabled") and not self._ocr_disabled
+        process_active = ocr_config.get("include_process_list", False)
+
+        if not ocr_active and not process_active:
+            return None
+
+        blocks = []
+        
+        if ocr_active:
+            try:
+                ocr_text = await asyncio.to_thread(self._run_ocr, ocr_config)
+                if ocr_text:
+                    ocr_text = ocr_text.strip()
+                    if ocr_text == self._ocr_last_text:
+                        self._ocr_same_count += 1
+                    else:
+                        self._ocr_same_count = 0
+                    self._ocr_last_text = ocr_text
+
+                    if self._ocr_same_count >= 2:
+                        self._ocr_disabled = True
+                    else:
+                        blocks.append(f"OCR Result:\n{ocr_text}")
+            except Exception as e:
+                print(f"[LLM] OCR Context Error: {e}")
+
+        if process_active:
+            process_items = self._get_visible_processes_on_active_monitor()
+            if process_items:
+                process_text = "\n".join([f"- {item}" for item in process_items])
+                blocks.append(f"Foreground Monitor Processes:\n{process_text}")
+
+        if not blocks:
+            return None
+        return "\n\n".join(blocks)
 
     def _parse_response(self, text: str) -> LLMResponse:
         response = LLMResponse(raw_response=text)
@@ -311,7 +476,8 @@ class LLMBackend:
             self.reconnect()
 
         try:
-            messages = self._build_messages(question)
+            ocr_context = await self._get_ocr_context()
+            messages = self._build_messages(question, ocr_context)
             processed_question = messages[-1]["content"]
 
             if model_type == "local" or model_type in [1, 2, 4, 6, 7, 8, 9]:
