@@ -208,7 +208,8 @@ class BehaviorMonitor(QThread):
                 self.global_history[gid] = now
                 self._last_any_trigger_time = now
                 self.trigger_counts[gid] = self.trigger_counts.get(gid, 0) + 1
-                self.trigger_matched.emit(rule.get("actions", []))
+                if not self.config.disable_actions:
+                    self.trigger_matched.emit(rule.get("actions", []))
                 break
     def _check_recursive_logic(self, node, win, idle, recovery, hw, ui, clip, weather, rid, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=None, mock_battery=None, mock_file_drop=None, path="root") -> bool:
         logic = node.get("logic", "AND").upper()
@@ -268,6 +269,14 @@ class BehaviorMonitor(QThread):
         elif t == "click_count":
             recent = [x for x in ui.get("last_click_times", []) if (time.time() - x) < c.get("duration", 5)]
             res = len(recent) >= c.get("count", 1)
+        elif t == "physics_acceleration_threshold":
+            res = ui.get("physics_acceleration", 0.0) > c.get("gt", 0.0)
+        elif t == "physics_bounce_count":
+            res = ui.get("physics_bounce_count", 0) >= c.get("count", 0)
+        elif t == "physics_fall_distance":
+            res = ui.get("physics_fall_distance", 0.0) > c.get("gt", 0.0)
+        elif t == "physics_window_collision_count":
+            res = ui.get("physics_window_collision_count", 0) >= c.get("count", 0)
         elif t == "idle_recovery": res = recovery > c.get("sec", 0)
         elif t == "idle_duration": res = idle > c.get("sec", 0)
         elif t == "fullscreen": res = self.is_fullscreen

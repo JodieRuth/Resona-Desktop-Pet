@@ -174,6 +174,67 @@ class LLMBackend:
         messages.append({"role": "user", "content": processed_question})
         return messages
 
+    def _build_messages_with_image(self, question: str, extra_context: Optional[str], image_base64: str) -> list:
+        messages = self._build_messages(question, extra_context)
+        image_url = f"data:image/png;base64,{image_base64}"
+        last_message = messages[-1]
+        last_message["content"] = [
+            {"type": "text", "text": last_message["content"]},
+            {"type": "image_url", "image_url": {"url": image_url}}
+        ]
+        return messages
+
+    def _extract_text_content(self, content: Any) -> str:
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    return part.get("text", "")
+            return ""
+        return content if isinstance(content, str) else str(content)
+
+    def _extract_base64_from_image_url(self, image_url: str) -> Optional[str]:
+        if not image_url:
+            return None
+        if image_url.startswith("data:image/") and "base64," in image_url:
+            return image_url.split("base64,", 1)[1]
+        return None
+
+    def _convert_to_gemini_parts(self, content: Any) -> list:
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "text":
+                    parts.append({"text": part.get("text", "")})
+                elif part.get("type") == "image_url":
+                    url = part.get("image_url", {}).get("url", "")
+                    base64_data = self._extract_base64_from_image_url(url)
+                    if base64_data:
+                        parts.append({"inline_data": {"mime_type": "image/png", "data": base64_data}})
+            return parts
+        return [{"text": content}] if isinstance(content, str) else [{"text": str(content)}]
+
+    def _convert_to_claude_content(self, content: Any) -> list:
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "text":
+                    parts.append({"type": "text", "text": part.get("text", "")})
+                elif part.get("type") == "image_url":
+                    url = part.get("image_url", {}).get("url", "")
+                    base64_data = self._extract_base64_from_image_url(url)
+                    if base64_data:
+                        parts.append({
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": "image/png", "data": base64_data}
+                        })
+            return parts
+        text = content if isinstance(content, str) else str(content)
+        return [{"type": "text", "text": text}]
+
     def _get_visible_processes_on_active_monitor(self) -> list:
         hwnd = win32gui.GetForegroundWindow()
         if not hwnd:
@@ -251,9 +312,10 @@ class LLMBackend:
             return self._tencent_ocr(image_base64, ocr_config["secret_id"], ocr_config["secret_key"])
         raise RuntimeError(f"Unsupported OCR provider: {provider}")
 
-    async def _get_ocr_context(self) -> Optional[str]:
-        ocr_config = self.config.get_ocr_config()
-        ocr_active = ocr_config.get("enabled") and not self._ocr_disabled
+    async def _get_ocr_context(self, ocr_config: Optional[dict] = None) -> Optional[str]:
+        if ocr_config is None:
+            ocr_config = self.config.get_ocr_config()
+        ocr_active = ocr_config.get("enabled") and not self._ocr_disabled and not ocr_config.get("vlm_enabled", False)
         process_active = ocr_config.get("include_process_list", False)
 
         if not ocr_active and not process_active:
@@ -280,7 +342,15 @@ class LLMBackend:
                 print(f"[LLM] OCR Context Error: {e}")
 
         if process_active:
-            process_items = self._get_visible_processes_on_active_monitor()
+            try:
+                process_items = await asyncio.wait_for(
+                    asyncio.to_thread(self._get_visible_processes_on_active_monitor),
+                    timeout=5
+                )
+            except asyncio.TimeoutError:
+                process_items = []
+            except Exception:
+                process_items = []
             if process_items:
                 process_text = "\n".join([f"- {item}" for item in process_items])
                 blocks.append(f"Foreground Monitor Processes:\n{process_text}")
@@ -317,15 +387,33 @@ class LLMBackend:
 
     def _log_interaction(self, request_data: Any, response_raw: str):
         import logging
+        import copy
         llm_logger = logging.getLogger("LLM")
         
         if not self.log_path: return
+
+        def mask_base64(obj):
+            if isinstance(obj, dict):
+                new_dict = {}
+                for k, v in obj.items():
+                    if k == "url" and isinstance(v, str) and v.startswith("data:image/"):
+                        new_dict[k] = v[:50] + "... [BASE64 TRUNCATED]"
+                    elif k == "data" and isinstance(v, str) and len(v) > 200:
+                        new_dict[k] = v[:50] + "... [BASE64 TRUNCATED]"
+                    else:
+                        new_dict[k] = mask_base64(v)
+                return new_dict
+            elif isinstance(obj, list):
+                return [mask_base64(item) for item in obj]
+            return obj
+
         try:
+            safe_data = mask_base64(request_data)
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.log_path, "a", encoding="utf-8") as f:
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 f.write(f"\n={'='*20} {ts} {'='*20}\n")
-                f.write(f"[REQUEST]\n{json.dumps(request_data, ensure_ascii=False, indent=2)}\n")
+                f.write(f"[REQUEST]\n{json.dumps(safe_data, ensure_ascii=False, indent=2)}\n")
                 f.write(f"[RESPONSE RAW]\n{response_raw}\n")
             
             llm_logger.info(f"Interaction logged to {self.log_path.name}")
@@ -400,9 +488,9 @@ class LLMBackend:
                 if msg["role"] == "system":
                     system_instruction = msg["content"]
                 elif msg["role"] == "user":
-                    gemini_msgs.append({"role": "user", "parts": [msg["content"]]})
+                    gemini_msgs.append({"role": "user", "parts": self._convert_to_gemini_parts(msg["content"])})
                 elif msg["role"] == "assistant":
-                    gemini_msgs.append({"role": "model", "parts": [msg["content"]]})
+                    gemini_msgs.append({"role": "model", "parts": self._convert_to_gemini_parts(msg["content"])})
 
             model = genai.GenerativeModel(
                 model_name=self._active_model_name,
@@ -410,9 +498,14 @@ class LLMBackend:
                 system_instruction=system_instruction
             )
             
-            response = await model.generate_content_async(
-                gemini_msgs,
-                generation_config={"temperature": temperature, "top_p": top_p, "max_output_tokens": max_tokens}
+            self._log_interaction({"system": system_instruction, "messages": gemini_msgs}, "WAITING...")
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    model.generate_content,
+                    gemini_msgs,
+                    generation_config={"temperature": temperature, "top_p": top_p, "max_output_tokens": max_tokens}
+                ),
+                timeout=60
             )
             
             if not response.candidates: return LLMResponse(error="Empty response")
@@ -445,7 +538,11 @@ class LLMBackend:
             if not self._claude_client: self.reconnect()
             
             system_prompt = next((m["content"] for m in messages if m["role"] == "system"), "")
-            filtered_messages = [m for m in messages if m["role"] != "system"]
+            filtered_messages = []
+            for m in messages:
+                if m["role"] == "system":
+                    continue
+                filtered_messages.append({"role": m["role"], "content": self._convert_to_claude_content(m["content"])})
             
             self._log_interaction(filtered_messages, "WAITING...")
             response = await self._claude_client.messages.create(
@@ -476,11 +573,29 @@ class LLMBackend:
             self.reconnect()
 
         try:
-            ocr_context = await self._get_ocr_context()
-            messages = self._build_messages(question, ocr_context)
-            processed_question = messages[-1]["content"]
+            ocr_config = self.config.get_ocr_config()
+            ocr_context = await self._get_ocr_context(ocr_config)
+            vlm_enabled = ocr_config.get("vlm_enabled", False)
+            image_base64 = None
+            if vlm_enabled:
+                try:
+                    image_base64 = await asyncio.wait_for(
+                        asyncio.to_thread(self._prepare_image_base64),
+                        timeout=10
+                    )
+                except asyncio.TimeoutError:
+                    image_base64 = None
+                except Exception:
+                    image_base64 = None
+            openai_compatible = model_type == "local" or model_type in [1, 2, 4, 6, 7, 8, 9]
+            image_capable = openai_compatible or model_type in [3, 5]
+            if image_base64 and image_capable:
+                messages = self._build_messages_with_image(question, ocr_context, image_base64)
+            else:
+                messages = self._build_messages(question, ocr_context)
+            processed_question = self._extract_text_content(messages[-1]["content"])
 
-            if model_type == "local" or model_type in [1, 2, 4, 6, 7, 8, 9]:
+            if openai_compatible:
                 response = await self.query_openai_compatible(
                     messages, model_name,
                     temperature=llm_config.get("temperature", 0.7),

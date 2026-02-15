@@ -345,6 +345,8 @@ class ApplicationController(QObject):
             log(f"[Main] OverflowError in _on_audio_finished: {e}")
             self._is_chain_executing = False
     def _trigger_voice_response(self, text, emotion, voice_file=None, is_behavior=False, tts_text=None, tts_lang=None):
+        if is_behavior and self.config.disable_actions:
+            return
         v_path = None
         if voice_file:
             pack_audio_path = self.config.pack_manager.get_path("audio", "event_dir")
@@ -381,6 +383,7 @@ class ApplicationController(QObject):
     def _handle_behavior_trigger(self, actions: list):
         if not actions or self.main_window.manual_hidden: return
         if self._pack_switch_pending: return
+        if self.config.disable_actions: return
         if self.interaction_locked: return
         if self.main_window.is_processing or self.main_window.is_listening:
             return
@@ -401,6 +404,10 @@ class ApplicationController(QObject):
             self._execute_actions_chain(actions)
     def _check_pending_triggers(self):
         now = time.time()
+        if self.config.disable_actions:
+            if self._pending_triggers:
+                self._pending_triggers = []
+            return
         if self._last_busy_state and not self.main_window.is_busy:
             self._post_busy_cooldown_end = now + self.config.post_busy_delay
         self._last_busy_state = self.main_window.is_busy
@@ -434,6 +441,8 @@ class ApplicationController(QObject):
         except Exception:
             pass
     def _execute_actions_chain(self, actions):
+        if self.config.disable_actions:
+            return
         if self.config.action_bring_to_front and not self.config.always_on_top:
             self.main_window.manual_show()
 
@@ -446,6 +455,10 @@ class ApplicationController(QObject):
 
         def execute_next():
             if self._chain_cancelled:
+                return
+            if self.config.disable_actions:
+                self._chain_cancelled = True
+                self._is_chain_executing = False
                 return
             if self._current_sequence_idx >= len(self._current_sequence):
                 if self._current_chain_callback:
@@ -527,6 +540,65 @@ class ApplicationController(QObject):
                     QTimer.singleShot(int(dur * 1000), self._unlock_interaction)
             except (ValueError, TypeError, OverflowError):
                 pass
+        elif atype == "physics_add_directional_acceleration":
+            if mw.physics_bridge:
+                engine = mw.physics_bridge.engine
+                try:
+                    direction = int(action.get("direction", 1))
+                except (ValueError, TypeError):
+                    direction = 1
+                try:
+                    magnitude = float(action.get("magnitude", 0.0))
+                except (ValueError, TypeError):
+                    magnitude = 0.0
+                direction = max(1, min(direction, 8))
+                dirs = [
+                    (1, 0),
+                    (1, -1),
+                    (0, -1),
+                    (-1, -1),
+                    (-1, 0),
+                    (-1, 1),
+                    (0, 1),
+                    (1, 1)
+                ]
+                dx, dy = dirs[direction - 1]
+                engine.accel_x += dx * magnitude
+                engine.accel_y += dy * magnitude
+                engine.accel_enabled = True
+        elif atype == "physics_disable_temporarily":
+            if mw.physics_bridge:
+                try:
+                    sec = float(action.get("sec", 1.0))
+                except (ValueError, TypeError):
+                    sec = 1.0
+                sec = max(0.0, min(sec, 300.0))
+                mw.physics_bridge.set_enabled(False)
+                QTimer.singleShot(int(sec * 1000), lambda: mw.physics_bridge.set_enabled(True))
+        elif atype == "physics_multiply_forces":
+            if mw.physics_bridge:
+                engine = mw.physics_bridge.engine
+                try:
+                    multiplier = float(action.get("multiplier", 1.0))
+                except (ValueError, TypeError):
+                    multiplier = 1.0
+                try:
+                    sec = float(action.get("sec", 1.0))
+                except (ValueError, TypeError):
+                    sec = 1.0
+                sec = max(0.0, min(sec, 300.0))
+                mw._physics_force_token += 1
+                token = mw._physics_force_token
+                mw._physics_force_restore = (engine.gravity, engine.accel_x, engine.accel_y)
+                engine.gravity *= multiplier
+                engine.accel_x *= multiplier
+                engine.accel_y *= multiplier
+                def restore():
+                    if getattr(mw, "_physics_force_token", 0) == token and mw.physics_bridge:
+                        restore_vals = getattr(mw, "_physics_force_restore", None)
+                        if restore_vals:
+                            engine.gravity, engine.accel_x, engine.accel_y = restore_vals
+                QTimer.singleShot(int(sec * 1000), restore)
         elif atype == "exit_app":
             log("[Main] Exit action triggered.")
             self.cleanup()
@@ -744,6 +816,8 @@ class ApplicationController(QObject):
             log("[Main] Config updated via settings dialog.")
             self.config.load()
             self.behavior_monitor.load_triggers()
+            if self.main_window:
+                self.main_window.refresh_from_config()
     def cleanup(self):
         if self._mocker_process: self._mocker_process.terminate()
         if self.behavior_monitor: self.behavior_monitor.stop()

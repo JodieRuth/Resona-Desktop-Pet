@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, QTimer, Signal, QEvent, QPoint, QRect, QPropertyA
 from PySide6.QtGui import QMouseEvent, QWheelEvent, QPixmap, QCursor, QGuiApplication, QAction, QActionGroup, QIcon
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QMenu, QGraphicsOpacityEffect, QApplication
 from resona_desktop_pet.config import ConfigManager
+from resona_desktop_pet.physics import PhysicsBridge
 from .character_view import CharacterView
 from .io_overlay import IOOverlay
 
@@ -33,8 +34,14 @@ class MainWindow(QWidget):
             "last_click_times": [], 
             "total_clicks": 0,
             "is_hovering": False,
-            "is_pressing": False
+            "is_pressing": False,
+            "physics_acceleration": 0.0,
+            "physics_bounce_count": 0,
+            "physics_fall_distance": 0.0,
+            "physics_window_collision_count": 0
         }
+        self._physics_force_token = 0
+        self._physics_force_restore = None
         self.input_hard_locked = False
         self.faded = False
         self.manual_hidden = False
@@ -96,7 +103,10 @@ class MainWindow(QWidget):
         self.dragging = False
         self.dragging_started = False
         self.drag_offset = QPoint()
-        self.drag_mod = Qt.KeyboardModifier.NoModifier 
+        self.drag_mod = Qt.KeyboardModifier.NoModifier
+        self.physics_pause_mod = Qt.KeyboardModifier.AltModifier
+        self.physics_pause_until_next_drag = False
+        self.physics_pause_after_drag = False
         self.thinking_texts = []
         self.load_thinking_texts()
         self.listening_texts = []
@@ -117,6 +127,11 @@ class MainWindow(QWidget):
         QTimer.singleShot(0, self.sync_window_to_sprite)
         self.dialogue = self.DialogueAdapter(self)
         self.sprite = self.SpriteAdapter(self)
+
+        # Physics
+        self.physics_bridge = None
+        if self.config.physics_enabled:
+            self.physics_bridge = PhysicsBridge(self, self.config)
 
         self.setAcceptDrops(True)
         self.character.setAcceptDrops(True)
@@ -363,10 +378,14 @@ class MainWindow(QWidget):
             return
         if self.config.always_on_top and sys.platform == "win32":
             try:
+                if not (self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint):
+                    self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+                    self.show()
+                    self.raise_()
                 hwnd = self.winId()
                 if not isinstance(hwnd, int):
                     hwnd = int(hwnd)
-                ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+                ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040)
             except:
                 pass
 
@@ -424,6 +443,14 @@ class MainWindow(QWidget):
             self.load_listening_texts()
             
             self._apply_window_settings()
+
+            if self.physics_bridge:
+                self.physics_bridge.set_enabled(False)
+                self.physics_bridge = None
+            if self.config.physics_enabled:
+                self.physics_bridge = PhysicsBridge(self, self.config)
+            self.physics_pause_until_next_drag = False
+            self.physics_pause_after_drag = False
             
             img_rect = self.character.image_rect()
             if img_rect.width() > 0 and img_rect.height() > 0:
@@ -473,6 +500,14 @@ class MainWindow(QWidget):
         box = QRect(x, y, w, h)
         box.adjust(0, 4, 0, -4)
         self.io.set_bounds(box)
+
+    def get_sprite_collision_rect(self):
+        img_rect = self.character.image_rect()
+        if img_rect.isEmpty():
+            return self.frameGeometry()
+        char_pos = self.character.pos()
+        top_left = self.mapToGlobal(char_pos + img_rect.topLeft())
+        return QRect(top_left, img_rect.size())
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         event_type = event.type()
@@ -552,11 +587,15 @@ class MainWindow(QWidget):
             if event.type() == QEvent.MouseButtonPress:
                 me = event 
                 if me.button() == Qt.MouseButton.LeftButton:
+                    if self.physics_pause_until_next_drag and self.physics_bridge:
+                        self.physics_bridge.set_enabled(True)
+                        self.physics_pause_until_next_drag = False
                     want_drag = (self.drag_mod == Qt.KeyboardModifier.NoModifier) or (me.modifiers() & self.drag_mod)
                     if want_drag:
                         self.dragging = True
                         self.dragging_started = False
                         self.drag_offset = me.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                        self.physics_pause_after_drag = self._should_pause_physics_for_drag(me.modifiers())
                         self.character.setCursor(Qt.CursorShape.ClosedHandCursor)
                         return True
             elif event.type() == QEvent.MouseMove:
@@ -576,6 +615,10 @@ class MainWindow(QWidget):
                     self.dragging = False
                     self.dragging_started = False
                     self.character.setCursor(Qt.CursorShape.OpenHandCursor)
+                    if self.physics_pause_after_drag and self.physics_bridge:
+                        self.physics_bridge.set_enabled(False)
+                        self.physics_pause_until_next_drag = True
+                    self.physics_pause_after_drag = False
                     return True
         if on_character and event.type() == QEvent.Resize:
             self.update_io_geometry()
@@ -704,6 +747,8 @@ class MainWindow(QWidget):
         menu.addSeparator()
         drag_menu = menu.addMenu("Drag Binding")
         self.populate_drag_menu(drag_menu)
+        pause_menu = menu.addMenu("Physics Drag Pause Binding")
+        self.populate_physics_pause_menu(pause_menu)
         menu.addSeparator()
         hide_action = menu.addAction("Hide (Background)")
         hide_action.triggered.connect(self.manual_hide)
@@ -781,6 +826,29 @@ class MainWindow(QWidget):
             
     def set_drag_mod(self, mod):
         self.drag_mod = mod
+
+    def populate_physics_pause_menu(self, menu: QMenu):
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        opts = [("Alt", Qt.KeyboardModifier.AltModifier),
+                ("Ctrl", Qt.KeyboardModifier.ControlModifier),
+                ("Shift", Qt.KeyboardModifier.ShiftModifier),
+                ("None", Qt.KeyboardModifier.NoModifier)]
+        for label, mod in opts:
+            action = QAction(label, menu)
+            action.setCheckable(True)
+            action.setChecked(self.physics_pause_mod == mod)
+            action.triggered.connect(lambda checked, m=mod: self.set_physics_pause_mod(m))
+            group.addAction(action)
+            menu.addAction(action)
+
+    def set_physics_pause_mod(self, mod):
+        self.physics_pause_mod = mod
+
+    def _should_pause_physics_for_drag(self, mods):
+        if self.physics_pause_mod == Qt.KeyboardModifier.NoModifier:
+            return mods == Qt.KeyboardModifier.NoModifier
+        return bool(mods & self.physics_pause_mod)
 
     @property
     def is_busy(self) -> bool:

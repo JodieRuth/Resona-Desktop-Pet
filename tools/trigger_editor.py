@@ -28,6 +28,10 @@ TRANSLATIONS = {
     "leave_duration": {"label": "离开时长(s)", "fields": ["sec"]},
     "long_press": {"label": "长按立绘(s)", "fields": ["sec"]},
     "click_count": {"label": "点击连击数", "fields": ["count", "duration"]},
+    "physics_acceleration_threshold": {"label": "物理加速度阈值(>)", "fields": ["gt"]},
+    "physics_bounce_count": {"label": "物理反弹次数(>=)", "fields": ["count"]},
+    "physics_fall_distance": {"label": "物理下落距离(>)", "fields": ["gt"]},
+    "physics_window_collision_count": {"label": "窗口碰撞次数(>=)", "fields": ["count"]},
     "fullscreen": {"label": "进入全屏模式", "fields": []},
     "weather_match": {"label": "天气匹配", "fields": ["keywords"]},
     "music_match": {"label": "音乐匹配(网易云)", "fields": ["keywords", "only_on_change"]},
@@ -36,6 +40,9 @@ TRANSLATIONS = {
     "process_uptime": {"label": "进程存活时间(s)", "fields": ["pname", "gt", "lt", "log"]},
     "battery_level": {"label": "电池电量(%)", "fields": ["gt", "lt", "charging", "log"]},
     "file_drop": {"label": "文件拖入检测(暂不可用)", "fields": ["exts", "name_keywords", "log"]},
+    "physics_add_directional_acceleration": {"label": "物理定向加速度", "fields": ["direction", "magnitude"]},
+    "physics_disable_temporarily": {"label": "物理临时禁用", "fields": ["sec"]},
+    "physics_multiply_forces": {"label": "物理力倍率", "fields": ["multiplier", "sec"]},
     "speak": {"label": "语音台词", "fields": ["text", "emotion", "voice_file"]},
     "delay": {"label": "延迟等待", "fields": ["sec"]},
     "move_to": {"label": "移动位置", "fields": ["pos"]},
@@ -53,6 +60,9 @@ TRANSLATIONS = {
     "date": "日期",
     "opacity": "透明度",
     "weight": "随机权重",
+    "direction": "方向(1-8)",
+    "magnitude": "加速度",
+    "multiplier": "倍率",
     "only_new": "仅检测新启动",
     "only_on_change": "仅切歌时触发一次",
     "hover_recovery": "悬停恢复时间(s)",
@@ -78,7 +88,7 @@ EMOTION_TAGS = [
     "<E:surprised>", "<E:dislike>", "<E:smirk>", "<E:embarrassed>"
 ]
 
-ACT_TYPES = {k: v for k, v in TRANSLATIONS.items() if k in ["speak", "delay", "random_group", "move_to", "fade_out", "exit_app", "lock_interaction"]}
+ACT_TYPES = {k: v for k, v in TRANSLATIONS.items() if k in ["speak", "delay", "random_group", "move_to", "fade_out", "exit_app", "lock_interaction", "physics_add_directional_acceleration", "physics_disable_temporarily", "physics_multiply_forces"]}
 COND_TYPES = {k: v for k, v in TRANSLATIONS.items() if isinstance(v, dict) and k not in ACT_TYPES and k not in ["AND", "OR", "CUMULATIVE"]}
 
 class TriggerEditor(QMainWindow):
@@ -632,6 +642,14 @@ class TriggerEditor(QMainWindow):
             new_a["sec"] = 5.0
         elif act_type == "random_group":
             new_a["branches"] = []
+        elif act_type == "physics_add_directional_acceleration":
+            new_a["direction"] = 1
+            new_a["magnitude"] = 500.0
+        elif act_type == "physics_disable_temporarily":
+            new_a["sec"] = 1.0
+        elif act_type == "physics_multiply_forces":
+            new_a["multiplier"] = 2.0
+            new_a["sec"] = 1.0
 
         actions = self.current_triggers[self.selected_index]["actions"]
         actions.append(new_a)

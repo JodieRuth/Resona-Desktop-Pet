@@ -151,6 +151,10 @@ class ConfigManager:
         return self.getboolean("General", "plugins_enabled", False)
 
     @property
+    def disable_actions(self) -> bool:
+        return self.getboolean("General", "disable_actions", False)
+
+    @property
     def tts_language(self) -> str:
         if self.use_pack_settings:
             return self.pack_manager.get_info("character", {}).get("tts_language", "ja")
@@ -354,6 +358,10 @@ class ConfigManager:
         return self.getboolean("OCR", "enabled", False)
 
     @property
+    def ocr_vlm_enabled(self) -> bool:
+        return self.getboolean("OCR", "vlm_enabled", False)
+
+    @property
     def ocr_provider(self) -> str:
         return self.get("OCR", "provider", "tencent").lower()
 
@@ -383,11 +391,13 @@ class ConfigManager:
 
     def get_ocr_config(self) -> dict:
         enabled = self.ocr_enabled
+        vlm_enabled = self.ocr_vlm_enabled
         provider = self.ocr_provider
         include_process_list = self.ocr_include_process_list
         sentence_limit = self.ocr_sentence_limit
         config = {
             "enabled": enabled,
+            "vlm_enabled": vlm_enabled,
             "provider": provider,
             "include_process_list": include_process_list,
             "sentence_limit": sentence_limit
@@ -407,6 +417,94 @@ class ConfigManager:
 
         return config
 
+
+    @property
+    def physics_enabled(self) -> bool:
+        return self.getboolean("Physics", "enabled", False)
+
+    @property
+    def physics_gravity(self) -> float:
+        return self.getfloat("Physics", "gravity", 300.0)
+
+    @property
+    def physics_gravity_enabled(self) -> bool:
+        return self.getboolean("Physics", "gravity_enabled", True)
+
+    @property
+    def physics_accel_x(self) -> float:
+        return self.getfloat("Physics", "accel_x", 0.0)
+
+    @property
+    def physics_accel_y(self) -> float:
+        return self.getfloat("Physics", "accel_y", 0.0)
+
+    @property
+    def physics_accel_enabled(self) -> bool:
+        return self.getboolean("Physics", "accel_enabled", False)
+
+    @property
+    def physics_invert_forces(self) -> bool:
+        return self.getboolean("Physics", "invert_forces", False)
+
+    @property
+    def physics_friction(self) -> float:
+        return self.getfloat("Physics", "friction", 0.98)
+
+    @property
+    def physics_friction_enabled(self) -> bool:
+        return self.getboolean("Physics", "friction_enabled", True)
+
+    @property
+    def physics_elasticity(self) -> float:
+        return self.getfloat("Physics", "elasticity", 0.6)
+
+    @property
+    def physics_bounce_enabled(self) -> bool:
+        return self.getboolean("Physics", "bounce_enabled", True)
+
+    @property
+    def physics_max_speed(self) -> float:
+        return self.getfloat("Physics", "max_speed", 2000.0)
+
+    @property
+    def physics_drag_velocity_multiplier(self) -> float:
+        return self.getfloat("Physics", "drag_velocity_multiplier", 1.2)
+
+    @property
+    def physics_drag_velocity_max(self) -> float:
+        return self.getfloat("Physics", "drag_velocity_max", 2500.0)
+
+    @property
+    def physics_sleep_still_frames(self) -> int:
+        return self.getint("Physics", "sleep_still_frames", 10)
+
+    @property
+    def physics_sleep_speed_threshold(self) -> float:
+        return self.getfloat("Physics", "sleep_speed_threshold", 1.5)
+
+    @property
+    def physics_collide_windows(self) -> bool:
+        return self.getboolean("Physics", "collide_windows", True)
+
+    @property
+    def physics_ignore_maximized_windows(self) -> bool:
+        return self.getboolean("Physics", "ignore_maximized_windows", True)
+
+    @property
+    def physics_ignore_fullscreen_windows(self) -> bool:
+        return self.getboolean("Physics", "ignore_fullscreen_windows", True)
+
+    @property
+    def physics_ignore_borderless_fullscreen(self) -> bool:
+        return self.getboolean("Physics", "ignore_borderless_fullscreen", True)
+
+    @property
+    def physics_screen_padding(self) -> int:
+        return self.getint("Physics", "screen_padding", 0)
+
+    @property
+    def physics_refresh_rate(self) -> float:
+        return self.getfloat("Physics", "refresh_rate", 0.0)
 
     @property
     def sovits_enabled(self) -> bool:

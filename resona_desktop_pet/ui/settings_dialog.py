@@ -114,6 +114,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._create_tts_tab(), "TTS")
         tabs.addTab(self._create_stt_tab(), "STT")
         tabs.addTab(self._create_ocr_tab(), "OCR")
+        tabs.addTab(self._create_physics_tab(), "Physics")
         layout.addWidget(tabs)
 
 
@@ -383,6 +384,9 @@ class SettingsDialog(QDialog):
         self.ocr_enabled_check = QCheckBox("Enable OCR")
         layout.addWidget(self.ocr_enabled_check)
 
+        self.ocr_vlm_enabled_check = QCheckBox("Enable VLM Image Capture")
+        layout.addWidget(self.ocr_vlm_enabled_check)
+
         ocr_group = QGroupBox("OCR Configuration")
         ocr_layout = QFormLayout(ocr_group)
 
@@ -422,6 +426,96 @@ class SettingsDialog(QDialog):
         self._update_ocr_provider_fields()
 
         layout.addWidget(ocr_group)
+        layout.addStretch()
+        return widget
+
+    def _create_physics_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        self.physics_enabled_check = QCheckBox("Enable Physics")
+        layout.addWidget(self.physics_enabled_check)
+
+        physics_group = QGroupBox("Physics Configuration")
+        physics_layout = QFormLayout(physics_group)
+
+        self.physics_refresh_rate_spin = QSpinBox()
+        self.physics_refresh_rate_spin.setRange(0, 240)
+        self.physics_refresh_rate_spin.setSpecialValueText("Auto")
+        physics_layout.addRow("Refresh Rate (0 = Auto):", self.physics_refresh_rate_spin)
+
+        self.physics_gravity_enabled_check = QCheckBox("Enable Gravity")
+        physics_layout.addRow(self.physics_gravity_enabled_check)
+
+        self.physics_gravity_spin = QDoubleSpinBox()
+        self.physics_gravity_spin.setRange(-5000.0, 5000.0)
+        self.physics_gravity_spin.setSingleStep(10.0)
+        physics_layout.addRow("Gravity Strength:", self.physics_gravity_spin)
+
+        self.physics_accel_enabled_check = QCheckBox("Enable Acceleration")
+        physics_layout.addRow(self.physics_accel_enabled_check)
+
+        self.physics_accel_x_spin = QDoubleSpinBox()
+        self.physics_accel_x_spin.setRange(-5000.0, 5000.0)
+        self.physics_accel_x_spin.setSingleStep(10.0)
+        physics_layout.addRow("Acceleration X:", self.physics_accel_x_spin)
+
+        self.physics_accel_y_spin = QDoubleSpinBox()
+        self.physics_accel_y_spin.setRange(-5000.0, 5000.0)
+        self.physics_accel_y_spin.setSingleStep(10.0)
+        physics_layout.addRow("Acceleration Y:", self.physics_accel_y_spin)
+
+        self.physics_invert_forces_check = QCheckBox("Invert Gravity & Acceleration")
+        physics_layout.addRow(self.physics_invert_forces_check)
+
+        self.physics_friction_enabled_check = QCheckBox("Enable Friction")
+        physics_layout.addRow(self.physics_friction_enabled_check)
+
+        self.physics_friction_spin = QDoubleSpinBox()
+        self.physics_friction_spin.setRange(0.0, 1.0)
+        self.physics_friction_spin.setSingleStep(0.01)
+        physics_layout.addRow("Friction (0-1):", self.physics_friction_spin)
+
+        self.physics_bounce_enabled_check = QCheckBox("Enable Bounce")
+        physics_layout.addRow(self.physics_bounce_enabled_check)
+
+        self.physics_elasticity_spin = QDoubleSpinBox()
+        self.physics_elasticity_spin.setRange(0.0, 1.0)
+        self.physics_elasticity_spin.setSingleStep(0.05)
+        physics_layout.addRow("Bounce Elasticity:", self.physics_elasticity_spin)
+
+        self.physics_max_speed_spin = QDoubleSpinBox()
+        self.physics_max_speed_spin.setRange(0.0, 10000.0)
+        self.physics_max_speed_spin.setSingleStep(50.0)
+        physics_layout.addRow("Max Speed (0 = No Limit):", self.physics_max_speed_spin)
+
+        self.physics_drag_velocity_multiplier_spin = QDoubleSpinBox()
+        self.physics_drag_velocity_multiplier_spin.setRange(0.0, 10.0)
+        self.physics_drag_velocity_multiplier_spin.setSingleStep(0.1)
+        physics_layout.addRow("Drag Velocity Multiplier:", self.physics_drag_velocity_multiplier_spin)
+
+        self.physics_drag_velocity_max_spin = QDoubleSpinBox()
+        self.physics_drag_velocity_max_spin.setRange(0.0, 10000.0)
+        self.physics_drag_velocity_max_spin.setSingleStep(50.0)
+        physics_layout.addRow("Drag Velocity Max (0 = No Limit):", self.physics_drag_velocity_max_spin)
+
+        self.physics_collide_windows_check = QCheckBox("Collide With Other Windows")
+        physics_layout.addRow(self.physics_collide_windows_check)
+
+        self.physics_ignore_maximized_check = QCheckBox("Ignore Maximized Windows")
+        physics_layout.addRow(self.physics_ignore_maximized_check)
+
+        self.physics_ignore_fullscreen_check = QCheckBox("Ignore Fullscreen Windows")
+        physics_layout.addRow(self.physics_ignore_fullscreen_check)
+
+        self.physics_ignore_borderless_check = QCheckBox("Ignore Borderless Fullscreen Windows")
+        physics_layout.addRow(self.physics_ignore_borderless_check)
+
+        self.physics_screen_padding_spin = QSpinBox()
+        self.physics_screen_padding_spin.setRange(-200, 200)
+        physics_layout.addRow("Screen Padding:", self.physics_screen_padding_spin)
+
+        layout.addWidget(physics_group)
         layout.addStretch()
         return widget
 
@@ -465,6 +559,7 @@ class SettingsDialog(QDialog):
         self.stt_model_dir_edit.setText(self.config.stt_model_dir)
 
         self.ocr_enabled_check.setChecked(self.config.ocr_enabled)
+        self.ocr_vlm_enabled_check.setChecked(self.config.ocr_vlm_enabled)
         self.ocr_provider_combo.setCurrentText(self.config.ocr_provider)
         self.ocr_include_process_check.setChecked(self.config.ocr_include_process_list)
         self.ocr_sentence_limit_spin.setValue(self.config.ocr_sentence_limit)
@@ -473,6 +568,27 @@ class SettingsDialog(QDialog):
         self.ocr_tencent_secret_id_edit.setText(self.config.ocr_tencent_secret_id)
         self.ocr_tencent_secret_key_edit.setText(self.config.ocr_tencent_secret_key)
         self._update_ocr_provider_fields()
+
+        self.physics_enabled_check.setChecked(self.config.physics_enabled)
+        self.physics_refresh_rate_spin.setValue(int(self.config.physics_refresh_rate))
+        self.physics_gravity_enabled_check.setChecked(self.config.physics_gravity_enabled)
+        self.physics_gravity_spin.setValue(self.config.physics_gravity)
+        self.physics_accel_enabled_check.setChecked(self.config.physics_accel_enabled)
+        self.physics_accel_x_spin.setValue(self.config.physics_accel_x)
+        self.physics_accel_y_spin.setValue(self.config.physics_accel_y)
+        self.physics_invert_forces_check.setChecked(self.config.physics_invert_forces)
+        self.physics_friction_enabled_check.setChecked(self.config.physics_friction_enabled)
+        self.physics_friction_spin.setValue(self.config.physics_friction)
+        self.physics_bounce_enabled_check.setChecked(self.config.physics_bounce_enabled)
+        self.physics_elasticity_spin.setValue(self.config.physics_elasticity)
+        self.physics_max_speed_spin.setValue(self.config.physics_max_speed)
+        self.physics_drag_velocity_multiplier_spin.setValue(self.config.physics_drag_velocity_multiplier)
+        self.physics_drag_velocity_max_spin.setValue(self.config.physics_drag_velocity_max)
+        self.physics_collide_windows_check.setChecked(self.config.physics_collide_windows)
+        self.physics_ignore_maximized_check.setChecked(self.config.physics_ignore_maximized_windows)
+        self.physics_ignore_fullscreen_check.setChecked(self.config.physics_ignore_fullscreen_windows)
+        self.physics_ignore_borderless_check.setChecked(self.config.physics_ignore_borderless_fullscreen)
+        self.physics_screen_padding_spin.setValue(self.config.physics_screen_padding)
 
     def _load_llm_config(self):
 
@@ -574,6 +690,7 @@ class SettingsDialog(QDialog):
             self.config.set("STT", "model_dir", self.stt_model_dir_edit.text())
 
             self.config.set("OCR", "enabled", str(self.ocr_enabled_check.isChecked()).lower())
+            self.config.set("OCR", "vlm_enabled", str(self.ocr_vlm_enabled_check.isChecked()).lower())
             self.config.set("OCR", "provider", self.ocr_provider_combo.currentText())
             self.config.set("OCR", "include_process_list", str(self.ocr_include_process_check.isChecked()).lower())
             self.config.set("OCR", "sentence_limit", str(self.ocr_sentence_limit_spin.value()))
@@ -582,6 +699,26 @@ class SettingsDialog(QDialog):
             self.config.set("OCR", "tencent_secret_id", self.ocr_tencent_secret_id_edit.text())
             self.config.set("OCR", "tencent_secret_key", self.ocr_tencent_secret_key_edit.text())
 
+            self.config.set("Physics", "enabled", str(self.physics_enabled_check.isChecked()).lower())
+            self.config.set("Physics", "refresh_rate", str(self.physics_refresh_rate_spin.value()))
+            self.config.set("Physics", "gravity_enabled", str(self.physics_gravity_enabled_check.isChecked()).lower())
+            self.config.set("Physics", "gravity", str(self.physics_gravity_spin.value()))
+            self.config.set("Physics", "accel_enabled", str(self.physics_accel_enabled_check.isChecked()).lower())
+            self.config.set("Physics", "accel_x", str(self.physics_accel_x_spin.value()))
+            self.config.set("Physics", "accel_y", str(self.physics_accel_y_spin.value()))
+            self.config.set("Physics", "invert_forces", str(self.physics_invert_forces_check.isChecked()).lower())
+            self.config.set("Physics", "friction_enabled", str(self.physics_friction_enabled_check.isChecked()).lower())
+            self.config.set("Physics", "friction", str(self.physics_friction_spin.value()))
+            self.config.set("Physics", "bounce_enabled", str(self.physics_bounce_enabled_check.isChecked()).lower())
+            self.config.set("Physics", "elasticity", str(self.physics_elasticity_spin.value()))
+            self.config.set("Physics", "max_speed", str(self.physics_max_speed_spin.value()))
+            self.config.set("Physics", "drag_velocity_multiplier", str(self.physics_drag_velocity_multiplier_spin.value()))
+            self.config.set("Physics", "drag_velocity_max", str(self.physics_drag_velocity_max_spin.value()))
+            self.config.set("Physics", "collide_windows", str(self.physics_collide_windows_check.isChecked()).lower())
+            self.config.set("Physics", "ignore_maximized_windows", str(self.physics_ignore_maximized_check.isChecked()).lower())
+            self.config.set("Physics", "ignore_fullscreen_windows", str(self.physics_ignore_fullscreen_check.isChecked()).lower())
+            self.config.set("Physics", "ignore_borderless_fullscreen", str(self.physics_ignore_borderless_check.isChecked()).lower())
+            self.config.set("Physics", "screen_padding", str(self.physics_screen_padding_spin.value()))
 
             self.config.save()
 
