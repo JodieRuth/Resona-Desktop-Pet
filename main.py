@@ -115,26 +115,26 @@ class ApplicationController(QObject):
         self.can_monitor_gpu = True
         try:
             import subprocess
+            log("[Main] GPU detection starting (using pnputil)...")
             output = ""
             try:
-                raw_out = subprocess.check_output("wmic path win32_VideoController get name", shell=True, stderr=subprocess.STDOUT)
+                result = subprocess.run(
+                    'pnputil /enum-devices /class Display',
+                    shell=True,
+                    stderr=subprocess.STDOUT,
+                    stdout=subprocess.PIPE,
+                    timeout=2
+                )
+                raw_out = result.stdout
                 try:
                     output = raw_out.decode("utf-8")
                 except UnicodeDecodeError:
                     output = raw_out.decode("gbk", errors="ignore")
-            except Exception:
-                pass
-
-            if not output.strip() or "wmic" in output.lower():
-                try:
-                    raw_out = subprocess.check_output('powershell -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"', shell=True, stderr=subprocess.STDOUT)
-                    try:
-                        output = raw_out.decode("utf-8")
-                    except UnicodeDecodeError:
-                        output = raw_out.decode("gbk", errors="ignore")
-                except Exception as ps_e:
-                    if not output.strip():
-                        log(f"[Main] GPU detection failed (both wmic and powershell): {ps_e}")
+            except subprocess.TimeoutExpired:
+                log("[Main] GPU detection timed out on pnputil.")
+            except Exception as ps_e:
+                if not output.strip():
+                    log(f"[Main] GPU detection failed (pnputil): {ps_e}")
 
             output_up = output.upper()
             has_nvidia = "NVIDIA" in output_up
@@ -176,6 +176,7 @@ class ApplicationController(QObject):
         self.interaction_locked = False
         self.state = self._load_state()
         if self.config.sovits_enabled:
+            log("[Main] SoVITS startup begin.")
             self.sovits_manager = SoVITSManager(
                 self.project_root,
                 self.config.sovits_api_port,

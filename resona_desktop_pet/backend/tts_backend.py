@@ -116,7 +116,7 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                     log(f"[TTS] Dynamic model switch detected: {pack_model_dir.name}")
 
             log(f"[TTS] Using reference audio: {ref_wav_path} with language: {ref_lang} (Prompt: {prompt_lang})")
-            output_path = os.path.join(self._temp_dir, f"output_{hash(text) & 0xffffffff}.wav")
+            output_path = os.path.join(self._temp_dir, f"output_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.wav")
             payload = {
                 "text": text, "text_lang": ref_lang,
                 "ref_audio_path": str(ref_wav_path.absolute()),
@@ -149,9 +149,15 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                         if os.path.getsize(output_path) == 0: return TTSResult(error="Generated audio is empty")
                         import soundfile as sf
                         try:
-                            data, sr = sf.read(output_path)
+                            info = sf.info(output_path)
+                            data, sr = sf.read(output_path, dtype="float32")
                             duration = len(data) / sr
                             log(f"[TTS] Audio duration: {duration:.2f}s")
+                            if info.subtype != "PCM_16":
+                                pcm_path = output_path.replace(".wav", "_pcm16.wav")
+                                sf.write(pcm_path, data, sr, subtype="PCM_16")
+                                log(f"[TTS] Audio converted to PCM_16: {pcm_path}")
+                                output_path = pcm_path
                             return TTSResult(audio_path=output_path, duration=duration)
                         except Exception as e:
                             log(f"[TTS] Failed to read audio duration: {e}")

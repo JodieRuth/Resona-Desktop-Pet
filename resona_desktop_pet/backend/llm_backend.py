@@ -15,6 +15,7 @@ import win32gui
 import win32api
 import win32process
 from PIL import ImageGrab
+from litellm import acompletion
 
 from ..config import ConfigManager
 
@@ -57,10 +58,8 @@ class LLMBackend:
         self.log_path = log_path
         self.history = ConversationHistory(max_rounds=config.max_rounds)
         
-        self._openai_client = None
-        self._claude_client = None
-        self._gemini_safety = {}
         self._active_model_name = None
+        self._active_model_signature = None
         self._ocr_last_text = None
         self._ocr_same_count = 0
         self._ocr_disabled = False
@@ -100,33 +99,10 @@ class LLMBackend:
         api_key = llm_cfg["api_key"]
         base_url = llm_cfg.get("base_url", "")
         
-        print(f"[LLM] Initializing persistent client for: {model_name}")
-
-        try:
-            if model_type == 5:
-                import google.generativeai as genai
-                from google.generativeai.types import HarmCategory, HarmBlockThreshold
-                
-                genai.configure(api_key=api_key)
-                self._gemini_safety = {
-                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                }
-            
-            elif model_type == "local" or model_type in [1, 2, 4, 6, 7, 8, 9]:
-                from openai import AsyncOpenAI
-                self._openai_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-                
-            elif model_type == 3:
-                import anthropic
-                self._claude_client = anthropic.AsyncAnthropic(api_key=api_key)
-                
-            self._active_model_name = model_name
-            print(f"[LLM] Client metadata initialized.")
-        except Exception as e:
-            print(f"[LLM] Failed to pre-initialize client: {e}")
+        print(f"[LLM] Initializing LLM session for: {model_name}")
+        self._active_model_name = model_name
+        self._active_model_signature = (model_type, model_name, api_key, base_url)
+        print(f"[LLM] Client metadata initialized.")
 
     def _get_precise_time_context(self) -> str:
         now = datetime.now()
@@ -192,48 +168,55 @@ class LLMBackend:
             return ""
         return content if isinstance(content, str) else str(content)
 
-    def _extract_base64_from_image_url(self, image_url: str) -> Optional[str]:
-        if not image_url:
-            return None
-        if image_url.startswith("data:image/") and "base64," in image_url:
-            return image_url.split("base64,", 1)[1]
-        return None
+    def _normalize_model_name(self, model_type: Any, model_name: str) -> str:
+        if not model_name:
+            return model_name
+        if "/" in model_name:
+            return model_name
+        provider = None
+        if model_type == "local":
+            provider = "openai"
+        elif model_type == 1:
+            provider = "openai"
+        elif model_type == 2:
+            provider = "deepseek"
+        elif model_type == 3:
+            provider = "anthropic"
+        elif model_type == 4:
+            provider = "moonshot"
+        elif model_type == 5:
+            provider = "gemini"
+        elif model_type == 6:
+            provider = "xai"
+        elif model_type in [7, 8, 9]:
+            provider = "openai"
+        if provider:
+            return f"{provider}/{model_name}"
+        return model_name
 
-    def _convert_to_gemini_parts(self, content: Any) -> list:
-        if isinstance(content, list):
-            parts = []
-            for part in content:
-                if not isinstance(part, dict):
-                    continue
-                if part.get("type") == "text":
-                    parts.append({"text": part.get("text", "")})
-                elif part.get("type") == "image_url":
-                    url = part.get("image_url", {}).get("url", "")
-                    base64_data = self._extract_base64_from_image_url(url)
-                    if base64_data:
-                        parts.append({"inline_data": {"mime_type": "image/png", "data": base64_data}})
-            return parts
-        return [{"text": content}] if isinstance(content, str) else [{"text": str(content)}]
-
-    def _convert_to_claude_content(self, content: Any) -> list:
-        if isinstance(content, list):
-            parts = []
-            for part in content:
-                if not isinstance(part, dict):
-                    continue
-                if part.get("type") == "text":
-                    parts.append({"type": "text", "text": part.get("text", "")})
-                elif part.get("type") == "image_url":
-                    url = part.get("image_url", {}).get("url", "")
-                    base64_data = self._extract_base64_from_image_url(url)
-                    if base64_data:
-                        parts.append({
-                            "type": "image",
-                            "source": {"type": "base64", "media_type": "image/png", "data": base64_data}
-                        })
-            return parts
-        text = content if isinstance(content, str) else str(content)
-        return [{"type": "text", "text": text}]
+    def _extract_litellm_message(self, response: Any) -> tuple[str, str]:
+        if isinstance(response, dict):
+            choices = response.get("choices", [])
+        else:
+            choices = getattr(response, "choices", [])
+        if not choices:
+            return "", ""
+        first = choices[0]
+        if isinstance(first, dict):
+            message = first.get("message") or {}
+        else:
+            message = getattr(first, "message", None) or {}
+        if isinstance(message, dict):
+            raw_text = message.get("content") or ""
+            reasoning = message.get("reasoning_content") or ""
+        else:
+            raw_text = getattr(message, "content", "") or ""
+            reasoning = getattr(message, "reasoning_content", "") or ""
+        if not isinstance(raw_text, str):
+            raw_text = self._extract_text_content(raw_text)
+        if not isinstance(reasoning, str):
+            reasoning = str(reasoning)
+        return raw_text, reasoning
 
     def _get_visible_processes_on_active_monitor(self) -> list:
         hwnd = win32gui.GetForegroundWindow()
@@ -420,37 +403,45 @@ class LLMBackend:
         except Exception as e:
             print(f"[LLM] Logging error: {e}")
 
-    async def query_openai_compatible(
+    async def _query_litellm(
         self,
         messages: list,
         model_name: str,
+        model_type: Any,
+        api_key: str,
+        base_url: str,
         temperature: float = 0.7,
         top_p: float = 1.0,
         max_tokens: int = 500
     ) -> LLMResponse:
         try:
-            if not self._openai_client: self.reconnect()
-            self._log_interaction(messages, "WAITING...")
-            
-            response = await self._openai_client.chat.completions.create(
-                model=model_name,
+            resolved_model = self._normalize_model_name(model_type, model_name)
+            if "gemini-3" in resolved_model.lower() and temperature < 1.0:
+                print(f"[LLM] Overriding temperature for {resolved_model}: {temperature} -> 1.0 (Required for Gemini 3)")
+                temperature = 1.0
+
+            request_payload = {
+                "model": resolved_model,
+                "messages": messages,
+                "temperature": temperature,
+                "top_p": top_p,
+                "max_tokens": max_tokens
+            }
+            if base_url:
+                request_payload["base_url"] = base_url
+            self._log_interaction(request_payload, "WAITING...")
+            print(f"[LLM] Sending to {resolved_model}")
+            response = await acompletion(
+                model=resolved_model,
                 messages=messages,
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
+                api_key=api_key or None,
+                base_url=base_url or None
             )
-            
 
-            if isinstance(response, str):
-                return LLMResponse(error=f"API returned an unexpected string. Please check if the Base URL is correct (Current: {self.config.get_llm_config().get('base_url')}). Error preview: {response[:100]}")
-
-            if not hasattr(response, 'choices') or not response.choices:
-                return LLMResponse(error="Abnormal API response: missing 'choices' field.")
-
-            message = response.choices[0].message
-            raw_text = message.content or ""
-            reasoning = getattr(message, "reasoning_content", "")
-            
+            raw_text, reasoning = self._extract_litellm_message(response)
             for tag in ["think", "thinking"]:
                 if f"<{tag}>" in raw_text:
                     pattern = rf"<{tag}>(.*?)</{tag}>"
@@ -461,104 +452,12 @@ class LLMBackend:
 
             log_content = f"[Reasoning]\n{reasoning}\n\n[Content]\n{raw_text}" if reasoning else raw_text
             self._log_interaction("DONE", log_content)
-            
-            if not raw_text: return LLMResponse(error="Empty response from LLM", thought=reasoning)
+
+            if not raw_text:
+                return LLMResponse(error="Empty response from LLM", thought=reasoning)
 
             llm_resp = self._parse_response(raw_text)
             llm_resp.thought = reasoning
-            return llm_resp
-        except Exception as e:
-            self._log_interaction("EXCEPTION", str(e))
-            return LLMResponse(error=str(e))
-
-    async def query_gemini(
-        self,
-        messages: list,
-        temperature: float = 0.7,
-        top_p: float = 1.0,
-        max_tokens: int = 500
-    ) -> LLMResponse:
-        try:
-            import google.generativeai as genai
-            
-            gemini_msgs = []
-            system_instruction = ""
-            
-            for msg in messages:
-                if msg["role"] == "system":
-                    system_instruction = msg["content"]
-                elif msg["role"] == "user":
-                    gemini_msgs.append({"role": "user", "parts": self._convert_to_gemini_parts(msg["content"])})
-                elif msg["role"] == "assistant":
-                    gemini_msgs.append({"role": "model", "parts": self._convert_to_gemini_parts(msg["content"])})
-
-            model = genai.GenerativeModel(
-                model_name=self._active_model_name,
-                safety_settings=self._gemini_safety,
-                system_instruction=system_instruction
-            )
-            
-            self._log_interaction({"system": system_instruction, "messages": gemini_msgs}, "WAITING...")
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    model.generate_content,
-                    gemini_msgs,
-                    generation_config={"temperature": temperature, "top_p": top_p, "max_output_tokens": max_tokens}
-                ),
-                timeout=60
-            )
-            
-            if not response.candidates: return LLMResponse(error="Empty response")
-            
-            raw_text = response.text
-            thought_text = ""
-            for tag in ["think", "thinking"]:
-                pattern = rf"<{tag}>(.*?)</{tag}>"
-                match = re.search(pattern, raw_text, re.DOTALL)
-                if match:
-                    thought_text += match.group(1).strip()
-                    raw_text = re.sub(pattern, "", raw_text, flags=re.DOTALL).strip()
-
-            self._log_interaction("DONE", f"[Thought]\n{thought_text}\n\n[Text]\n{raw_text}")
-            llm_resp = self._parse_response(raw_text)
-            llm_resp.thought = thought_text
-            return llm_resp
-        except Exception as e:
-            self._log_interaction("EXCEPTION", str(e))
-            return LLMResponse(error=str(e))
-
-    async def query_claude(
-        self,
-        messages: list,
-        model_name: str,
-        temperature: float = 0.7,
-        max_tokens: int = 500
-    ) -> LLMResponse:
-        try:
-            if not self._claude_client: self.reconnect()
-            
-            system_prompt = next((m["content"] for m in messages if m["role"] == "system"), "")
-            filtered_messages = []
-            for m in messages:
-                if m["role"] == "system":
-                    continue
-                filtered_messages.append({"role": m["role"], "content": self._convert_to_claude_content(m["content"])})
-            
-            self._log_interaction(filtered_messages, "WAITING...")
-            response = await self._claude_client.messages.create(
-                model=model_name,
-                system=system_prompt,
-                messages=filtered_messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-
-            final_text = "".join(block.text for block in response.content if block.type == "text")
-            thought_text = "".join(block.thinking for block in response.content if block.type == "thinking")
-
-            self._log_interaction("DONE", f"[Thought]\n{thought_text}\n\n[Text]\n{final_text}")
-            llm_resp = self._parse_response(final_text)
-            llm_resp.thought = thought_text
             return llm_resp
         except Exception as e:
             self._log_interaction("EXCEPTION", str(e))
@@ -568,8 +467,11 @@ class LLMBackend:
         llm_config = self.config.get_llm_config()
         model_type = llm_config["model_type"]
         model_name = llm_config["model_name"]
+        api_key = llm_config["api_key"]
+        base_url = llm_config.get("base_url", "")
         
-        if model_name != self._active_model_name:
+        current_signature = (model_type, model_name, api_key, base_url)
+        if current_signature != self._active_model_signature:
             self.reconnect()
 
         try:
@@ -594,25 +496,35 @@ class LLMBackend:
             else:
                 messages = self._build_messages(question, ocr_context)
             processed_question = self._extract_text_content(messages[-1]["content"])
+            prompt_parts = []
+            if self.config.enable_time_context:
+                prompt_parts.append("time")
+            if self.config.enable_ip_context and self._ip_context:
+                prompt_parts.append("ip")
+            if ocr_context:
+                if "OCR Result" in ocr_context:
+                    prompt_parts.append("ocr")
+                if "Foreground Monitor Processes" in ocr_context:
+                    prompt_parts.append("process")
+                if "OCR Result" not in ocr_context and "Foreground Monitor Processes" not in ocr_context:
+                    prompt_parts.append("extra_context")
+            if image_base64 and image_capable:
+                prompt_parts.append("image")
+            if self.history.get_messages():
+                prompt_parts.append("history")
+            parts_text = ", ".join(prompt_parts) if prompt_parts else "base"
+            print(f"[LLM] Prompt built. Parts: {parts_text}")
 
-            if openai_compatible:
-                response = await self.query_openai_compatible(
-                    messages, model_name,
-                    temperature=llm_config.get("temperature", 0.7),
-                    top_p=llm_config.get("top_p", 1.0),
-                    max_tokens=llm_config.get("max_tokens", 500)
-                )
-            elif model_type == 5:
-                response = await self.query_gemini(
+            supported_types = {"local", 1, 2, 3, 4, 5, 6, 7, 8, 9}
+            if model_type in supported_types:
+                response = await self._query_litellm(
                     messages,
+                    model_name,
+                    model_type,
+                    api_key,
+                    base_url,
                     temperature=llm_config.get("temperature", 0.7),
                     top_p=llm_config.get("top_p", 1.0),
-                    max_tokens=llm_config.get("max_tokens", 500)
-                )
-            elif model_type == 3:
-                response = await self.query_claude(
-                    messages, model_name,
-                    temperature=llm_config.get("temperature", 0.7),
                     max_tokens=llm_config.get("max_tokens", 500)
                 )
             else:

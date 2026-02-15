@@ -480,7 +480,7 @@ class ConfigManager:
 
     @property
     def physics_sleep_speed_threshold(self) -> float:
-        return self.getfloat("Physics", "sleep_speed_threshold", 1.5)
+        return self.getfloat("Physics", "sleep_speed_threshold", 30)
 
     @property
     def physics_collide_windows(self) -> bool:

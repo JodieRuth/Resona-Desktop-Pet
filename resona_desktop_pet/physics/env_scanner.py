@@ -70,6 +70,24 @@ class EnvironmentScanner:
         WS_EX_TOOLWINDOW = 0x00000080
         DWMWA_CLOAKED = 14
 
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.c_uint),
+                ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT),
+                ("dwFlags", ctypes.c_uint)
+            ]
+
+        class WINDOWPLACEMENT(ctypes.Structure):
+            _fields_ = [
+                ("length", ctypes.c_uint),
+                ("flags", ctypes.c_uint),
+                ("showCmd", ctypes.c_uint),
+                ("ptMinPosition", wintypes.POINT),
+                ("ptMaxPosition", wintypes.POINT),
+                ("rcNormalPosition", wintypes.RECT)
+            ]
+
         EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
         def enum_proc(hwnd, lparam):
@@ -80,6 +98,12 @@ class EnvironmentScanner:
                 return True
             if user32.IsIconic(hwnd):
                 return True
+            if ignore_maximized:
+                placement = WINDOWPLACEMENT()
+                placement.length = ctypes.sizeof(WINDOWPLACEMENT)
+                if user32.GetWindowPlacement(hwnd, ctypes.byref(placement)):
+                    if placement.showCmd == 3:
+                        return True
             class_name = ctypes.create_unicode_buffer(256)
             user32.GetClassNameW(hwnd, class_name, 256)
             if class_name.value in ignore_classes:
@@ -108,13 +132,6 @@ class EnvironmentScanner:
             mon_full = full_geo
             mon_work = screen_geo
             if monitor:
-                class MONITORINFO(ctypes.Structure):
-                    _fields_ = [
-                        ("cbSize", ctypes.c_uint),
-                        ("rcMonitor", ctypes.wintypes.RECT),
-                        ("rcWork", ctypes.wintypes.RECT),
-                        ("dwFlags", ctypes.c_uint)
-                    ]
                 mi = MONITORINFO()
                 mi.cbSize = ctypes.sizeof(MONITORINFO)
                 if user32.GetMonitorInfoW(monitor, ctypes.byref(mi)):
@@ -126,11 +143,17 @@ class EnvironmentScanner:
                                      mi.rcWork.bottom - mi.rcWork.top)
 
             if ignore_fullscreen or ignore_borderless_fullscreen:
-                if abs(qr.left() - mon_full.left()) <= tol and abs(qr.top() - mon_full.top()) <= tol and abs(qr.right() - mon_full.right()) <= tol and abs(qr.bottom() - mon_full.bottom()) <= tol:
+                if (abs(qr.left() - mon_full.left()) <= tol and 
+                    abs(qr.top() - mon_full.top()) <= tol and 
+                    abs(qr.right() - mon_full.right()) <= tol and 
+                    abs(qr.bottom() - mon_full.bottom()) <= tol):
                     return True
 
             if ignore_maximized:
-                if abs(qr.left() - mon_work.left()) <= tol and abs(qr.top() - mon_work.top()) <= tol and abs(qr.right() - mon_work.right()) <= tol and abs(qr.bottom() - mon_work.bottom()) <= tol:
+                if (abs(qr.left() - mon_work.left()) <= tol and 
+                    abs(qr.top() - mon_work.top()) <= tol and 
+                    abs(qr.right() - mon_work.right()) <= tol and 
+                    abs(qr.bottom() - mon_work.bottom()) <= tol):
                     return True
 
             if ignore_fullscreen or ignore_borderless_fullscreen or ignore_maximized:
