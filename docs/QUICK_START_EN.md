@@ -35,7 +35,7 @@ Follow these steps to get your ResonaDesktopPet up and running in minutes.
 - Double-click `run.bat`.
 - Once the pet appears:
   - **Click it**: Open the dialogue box for text chat.
-  - **Press Alt+Q**: Start recording; release to send a voice command.
+  - **Press Ctrl+Shift+I**: Start/Stop recording.
   - **Right-click**: Change outfits, switch packs, or open settings.
 
 ## 4. Advanced

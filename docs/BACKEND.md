@@ -23,7 +23,7 @@
 负责语音识别。
 - **SenseVoice 引擎**：使用离线 SenseVoice 模型，具备极高的识别速度与准确率。项目中的 `setup.ps1` 安装脚本下载并使用的语音识别模型 SenseVoiceSmall 是由 Alibaba Group (FunASR) 开发并开源的，遵循 FunASR Model License 1.1。 该脚本使用了由 k2-fsa / sherpa-onnx 项目提供的 ONNX 转换版本。
 - **自动静音检测 (VAD)**：在检测到一段时间的静音后自动停止录音并开始识别。
-- **快捷键绑定**：支持全局热键（默认 `Alt+Q`）呼出语音对话。
+- **快捷键绑定**：支持全局热键（默认 `Ctrl+Shift+I`）呼出语音对话。
 
 ## 4. SoVITS 管理器 (`sovits_manager.py`)
 负责管理 SoVITS 后台进程。
