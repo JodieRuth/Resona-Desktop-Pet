@@ -58,8 +58,15 @@ class CleanupManager:
             try:
                 logger.info(f"Killing process {pid}...")
                 if sys.platform == "win32":
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], 
-                                   capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    try:
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(pid)],
+                            capture_output=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW,
+                            timeout=3
+                        )
+                    except subprocess.TimeoutExpired:
+                        logger.warning(f"taskkill timeout for PID {pid}")
                 
                 parent = psutil.Process(pid)
                 children = parent.children(recursive=True)

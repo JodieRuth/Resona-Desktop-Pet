@@ -1,4 +1,5 @@
 import os
+import locale
 import sys
 import subprocess
 import time
@@ -129,13 +130,35 @@ class SoVITSManager:
         cmd = [python_exec, self.rel_api_script, "-a", "127.0.0.1", "-p", str(self.port), "-c", str(Path(actual_config_file).absolute())]
         print(f"[SoVITS] Starting process with command: {' '.join(cmd)}")
         try:
+            preferred_encoding = locale.getpreferredencoding(False)
             if sys.platform == "win32":
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = subprocess.SW_HIDE
-                self.process = subprocess.Popen(cmd, cwd=str(self.gpt_sovits_dir), stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, text=True, bufsize=1, encoding='utf-8', errors='replace')
+                self.process = subprocess.Popen(
+                    cmd,
+                    cwd=str(self.gpt_sovits_dir),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    startupinfo=startupinfo,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    text=True,
+                    bufsize=1,
+                    encoding=preferred_encoding,
+                    errors='replace'
+                )
             else:
-                self.process = subprocess.Popen(cmd, cwd=str(self.gpt_sovits_dir), stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid, text=True, bufsize=1, encoding='utf-8', errors='replace')
+                self.process = subprocess.Popen(
+                    cmd,
+                    cwd=str(self.gpt_sovits_dir),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    preexec_fn=os.setsid,
+                    text=True,
+                    bufsize=1,
+                    encoding=preferred_encoding,
+                    errors='replace'
+                )
             register_pid(self.process.pid)
             if sys.platform == "win32":
                 try:

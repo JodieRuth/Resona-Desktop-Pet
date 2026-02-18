@@ -3,8 +3,9 @@ import re
 import asyncio
 import base64
 import io
+import logging
 from datetime import datetime
-from typing import Optional, Callable, Any, List
+from typing import Optional, Callable, Any, List, Dict, Tuple
 from pathlib import Path
 from dataclasses import dataclass, field
 
@@ -18,6 +19,7 @@ from PIL import ImageGrab
 from litellm import acompletion
 
 from ..config import ConfigManager
+from .mcp_manager import MCPManager
 
 
 @dataclass
@@ -51,12 +53,18 @@ class ConversationHistory:
         self.history.clear()
 
 
+def log(message):
+    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    print(f"[{timestamp}] [LLM] {message}")
+
+
 class LLMBackend:
 
-    def __init__(self, config: ConfigManager, log_path: Optional[Path] = None):
+    def __init__(self, config: ConfigManager, log_path: Optional[Path] = None, mcp_manager: Optional[MCPManager] = None):
         self.config = config
         self.log_path = log_path
         self.history = ConversationHistory(max_rounds=config.max_rounds)
+        self._mcp_manager = mcp_manager
         
         self._active_model_name = None
         self._active_model_signature = None
@@ -122,9 +130,49 @@ class LLMBackend:
         
         return f"{time_str} ({weekday}, {period})"
 
+    def _get_mcp_system_instruction(self) -> str:
+        return (
+            "If tools are available, use them when needed. "
+            "When you call a tool, do not return JSON in that turn. "
+            "After tool results are provided, reply with one final JSON only."
+        )
+
+    def _extract_tool_calls(self, response: Any) -> List[Any]:
+        if isinstance(response, dict):
+            choices = response.get("choices", [])
+        else:
+            choices = getattr(response, "choices", [])
+        if not choices:
+            return []
+        first = choices[0]
+        if isinstance(first, dict):
+            message = first.get("message") or {}
+        else:
+            message = getattr(first, "message", None) or {}
+        if isinstance(message, dict):
+            tool_calls = message.get("tool_calls")
+        else:
+            tool_calls = getattr(message, "tool_calls", None)
+        return tool_calls or []
+
+    def _normalize_tool_call(self, tool_call: Any) -> Tuple[Optional[str], Optional[str], Any]:
+        if isinstance(tool_call, dict):
+            call_id = tool_call.get("id")
+            func = tool_call.get("function") or {}
+            name = func.get("name")
+            arguments = func.get("arguments")
+            return call_id, name, arguments
+        call_id = getattr(tool_call, "id", None)
+        func = getattr(tool_call, "function", None)
+        name = getattr(func, "name", None) if func else None
+        arguments = getattr(func, "arguments", None) if func else None
+        return call_id, name, arguments
+
     def _build_messages(self, question: str, extra_context: Optional[str] = None) -> list:
         messages = []
         system_prompt = self.config.get_prompt()
+        if self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
+            system_prompt = f"{system_prompt}\n\n{self._get_mcp_system_instruction()}"
         
         messages.append({"role": "system", "content": system_prompt})
 
@@ -344,7 +392,7 @@ class LLMBackend:
 
     def _parse_response(self, text: str) -> LLMResponse:
         response = LLMResponse(raw_response=text)
-        print(f"[LLM] Raw response from API: {text[:200]}...")
+        log(f"Raw response from API: {text}")
 
         json_str = text.strip()
         if "```" in json_str:
@@ -364,7 +412,7 @@ class LLMBackend:
             response.text_tts = data.get("text_tts", response.text_display)
             return response
         except json.JSONDecodeError as e:
-            print(f"[LLM] JSON Parse Error: {e} | Candidate: {json_str[:100]}...")
+            log(f"JSON Parse Error: {e} | Candidate: {json_str}")
             response.error = f"JSON parsing failed: {str(e)}"
             return response
 
@@ -403,6 +451,62 @@ class LLMBackend:
         except Exception as e:
             print(f"[LLM] Logging error: {e}")
 
+    async def _call_litellm_raw(
+        self,
+        messages: list,
+        model_name: str,
+        model_type: Any,
+        api_key: str,
+        base_url: str,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
+        temperature: float = 0.7,
+        top_p: float = 1.0,
+        max_tokens: int = 500
+    ) -> Tuple[Any, str, str, List[Any]]:
+        resolved_model = self._normalize_model_name(model_type, model_name)
+        if "gemini-3" in resolved_model.lower() and temperature < 1.0:
+            print(f"[LLM] Overriding temperature for {resolved_model}: {temperature} -> 1.0 (Required for Gemini 3)")
+            temperature = 1.0
+        request_payload = {
+            "model": resolved_model,
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens
+        }
+        if base_url:
+            request_payload["base_url"] = base_url
+        if tools:
+            request_payload["tools"] = tools
+            if tool_choice:
+                request_payload["tool_choice"] = tool_choice
+        self._log_interaction(request_payload, "WAITING...")
+        print(f"[LLM] Sending to {resolved_model}")
+        response = await acompletion(
+            model=resolved_model,
+            messages=messages,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            api_key=api_key or None,
+            base_url=base_url or None,
+            tools=tools or None,
+            tool_choice=tool_choice or None
+        )
+        raw_text, reasoning = self._extract_litellm_message(response)
+        for tag in ["think", "thinking"]:
+            if f"<{tag}>" in raw_text:
+                pattern = rf"<{tag}>(.*?)</{tag}>"
+                match = re.search(pattern, raw_text, re.DOTALL)
+                if match:
+                    reasoning += match.group(1).strip()
+                    raw_text = re.sub(pattern, "", raw_text, flags=re.DOTALL).strip()
+        tool_calls = self._extract_tool_calls(response)
+        log_content = f"[Reasoning]\n{reasoning}\n\n[Content]\n{raw_text}" if reasoning else raw_text
+        self._log_interaction("DONE", log_content)
+        return response, raw_text, reasoning, tool_calls
+
     async def _query_litellm(
         self,
         messages: list,
@@ -415,43 +519,18 @@ class LLMBackend:
         max_tokens: int = 500
     ) -> LLMResponse:
         try:
-            resolved_model = self._normalize_model_name(model_type, model_name)
-            if "gemini-3" in resolved_model.lower() and temperature < 1.0:
-                print(f"[LLM] Overriding temperature for {resolved_model}: {temperature} -> 1.0 (Required for Gemini 3)")
-                temperature = 1.0
-
-            request_payload = {
-                "model": resolved_model,
-                "messages": messages,
-                "temperature": temperature,
-                "top_p": top_p,
-                "max_tokens": max_tokens
-            }
-            if base_url:
-                request_payload["base_url"] = base_url
-            self._log_interaction(request_payload, "WAITING...")
-            print(f"[LLM] Sending to {resolved_model}")
-            response = await acompletion(
-                model=resolved_model,
-                messages=messages,
+            _, raw_text, reasoning, _ = await self._call_litellm_raw(
+                messages,
+                model_name,
+                model_type,
+                api_key,
+                base_url,
+                tools=None,
+                tool_choice=None,
                 temperature=temperature,
                 top_p=top_p,
-                max_tokens=max_tokens,
-                api_key=api_key or None,
-                base_url=base_url or None
+                max_tokens=max_tokens
             )
-
-            raw_text, reasoning = self._extract_litellm_message(response)
-            for tag in ["think", "thinking"]:
-                if f"<{tag}>" in raw_text:
-                    pattern = rf"<{tag}>(.*?)</{tag}>"
-                    match = re.search(pattern, raw_text, re.DOTALL)
-                    if match:
-                        reasoning += match.group(1).strip()
-                        raw_text = re.sub(pattern, "", raw_text, flags=re.DOTALL).strip()
-
-            log_content = f"[Reasoning]\n{reasoning}\n\n[Content]\n{raw_text}" if reasoning else raw_text
-            self._log_interaction("DONE", log_content)
 
             if not raw_text:
                 return LLMResponse(error="Empty response from LLM", thought=reasoning)
@@ -462,6 +541,97 @@ class LLMBackend:
         except Exception as e:
             self._log_interaction("EXCEPTION", str(e))
             return LLMResponse(error=str(e))
+
+    async def _query_with_tools(
+        self,
+        messages: list,
+        model_name: str,
+        model_type: Any,
+        api_key: str,
+        base_url: str,
+        tools: List[Dict[str, Any]],
+        max_tool_rounds: int,
+        temperature: float = 0.7,
+        top_p: float = 1.0,
+        max_tokens: int = 500
+    ) -> LLMResponse:
+        attempted_retry = False
+        for _ in range(max_tool_rounds + 1):
+            _, raw_text, reasoning, tool_calls = await self._call_litellm_raw(
+                messages,
+                model_name,
+                model_type,
+                api_key,
+                base_url,
+                tools=tools,
+                tool_choice="auto",
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens
+            )
+
+            if tool_calls:
+                serializable_tool_calls = []
+                for tc in tool_calls:
+                    if hasattr(tc, "model_dump"):
+                        serializable_tool_calls.append(tc.model_dump())
+                    elif hasattr(tc, "dict"):
+                        serializable_tool_calls.append(tc.dict())
+                    elif isinstance(tc, dict):
+                         serializable_tool_calls.append(tc)
+                    else:
+                        serializable_tool_calls.append(dict(tc))
+                
+                messages.append({"role": "assistant", "content": raw_text or "", "tool_calls": serializable_tool_calls})
+                for tool_call in tool_calls:
+                    call_id, name, arguments = self._normalize_tool_call(tool_call)
+                    if not name:
+                        messages.append({"role": "tool", "content": "Tool call missing name.", "tool_call_id": call_id or ""})
+                        continue
+                    parsed_args: Dict[str, Any] = {}
+                    if isinstance(arguments, str):
+                        if arguments.strip():
+                            try:
+                                parsed_args = json.loads(arguments)
+                            except Exception as e:
+                                parsed_args = {"_error": f"Invalid arguments: {e}", "_raw": arguments}
+                    elif isinstance(arguments, dict):
+                        parsed_args = arguments
+                    
+                    try:
+                        tool_result = await self._mcp_manager.call_tool(name, parsed_args)
+                    except Exception as e:
+                        tool_result = f"Tool error: {e}"
+                    
+                    if not isinstance(tool_result, str):
+                        tool_result = str(tool_result)
+                    
+                    log(f"[LLM] Called tool {name}, result: {tool_result}")
+                        
+                    messages.append({"role": "tool", "content": tool_result, "tool_call_id": call_id or ""})
+                continue
+
+            if raw_text:
+                llm_resp = self._parse_response(raw_text)
+                llm_resp.thought = reasoning
+                if not llm_resp.error:
+                    return llm_resp
+                if not attempted_retry:
+                    attempted_retry = True
+                    messages.append({"role": "assistant", "content": raw_text})
+                    messages.append({"role": "user", "content": "Your response is not valid JSON. Please return ONLY valid JSON, no other text."})
+                    continue
+                return llm_resp
+
+            if not attempted_retry:
+                attempted_retry = True
+                messages.append({"role": "assistant", "content": raw_text or ""})
+                messages.append({"role": "user", "content": "Your response is empty. Please return ONLY valid JSON."})
+                continue
+
+            return LLMResponse(error="Empty response from LLM")
+
+        return LLMResponse(error="Tool call exceeded max rounds")
 
     async def query(self, question: str) -> LLMResponse:
         llm_config = self.config.get_llm_config()
@@ -496,6 +666,11 @@ class LLMBackend:
             else:
                 messages = self._build_messages(question, ocr_context)
             processed_question = self._extract_text_content(messages[-1]["content"])
+            tools: List[Dict[str, Any]] = []
+            max_tool_rounds = 0
+            if self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
+                tools = self._mcp_manager.get_tools()
+                max_tool_rounds = max(self._mcp_manager.max_tool_rounds, 0)
             prompt_parts = []
             if self.config.enable_time_context:
                 prompt_parts.append("time")
@@ -517,16 +692,30 @@ class LLMBackend:
 
             supported_types = {"local", 1, 2, 3, 4, 5, 6, 7, 8, 9}
             if model_type in supported_types:
-                response = await self._query_litellm(
-                    messages,
-                    model_name,
-                    model_type,
-                    api_key,
-                    base_url,
-                    temperature=llm_config.get("temperature", 0.7),
-                    top_p=llm_config.get("top_p", 1.0),
-                    max_tokens=llm_config.get("max_tokens", 500)
-                )
+                if tools:
+                    response = await self._query_with_tools(
+                        messages,
+                        model_name,
+                        model_type,
+                        api_key,
+                        base_url,
+                        tools=tools,
+                        max_tool_rounds=max_tool_rounds,
+                        temperature=llm_config.get("temperature", 0.7),
+                        top_p=llm_config.get("top_p", 1.0),
+                        max_tokens=llm_config.get("max_tokens", 500)
+                    )
+                else:
+                    response = await self._query_litellm(
+                        messages,
+                        model_name,
+                        model_type,
+                        api_key,
+                        base_url,
+                        temperature=llm_config.get("temperature", 0.7),
+                        top_p=llm_config.get("top_p", 1.0),
+                        max_tokens=llm_config.get("max_tokens", 500)
+                    )
             else:
                 response = LLMResponse(error=f"Unsupported model type: {model_type}")
         except Exception as e:

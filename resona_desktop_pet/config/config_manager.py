@@ -556,6 +556,23 @@ class ConfigManager:
 
 
     @property
+    def mcp_enabled(self) -> bool:
+        return self.getboolean("MCP", "enabled", False)
+
+    @property
+    def mcp_server_dir(self) -> str:
+        return self.get("MCP", "server_dir", "mcpserver")
+
+    @property
+    def mcp_startup_timeout(self) -> int:
+        return self.getint("MCP", "startup_timeout", 20)
+
+    @property
+    def mcp_max_tool_rounds(self) -> int:
+        return self.getint("MCP", "max_tool_rounds", 6)
+
+
+    @property
     def monitor_clipboard(self) -> bool:
         return self.get_bool("General", "monitor_clipboard", True)
 

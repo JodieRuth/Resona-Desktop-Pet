@@ -18,7 +18,7 @@ from PySide6.QtCore import QObject, Signal, QTimer, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from resona_desktop_pet.config import ConfigManager
-from resona_desktop_pet.backend import LLMBackend, TTSBackend, STTBackend
+from resona_desktop_pet.backend import LLMBackend, TTSBackend, STTBackend, MCPManager
 from resona_desktop_pet.backend.sovits_manager import SoVITSManager
 from resona_desktop_pet.ui.luna.main_window import MainWindow
 from resona_desktop_pet.ui.tray_icon import TrayIcon
@@ -174,6 +174,7 @@ class ApplicationController(QObject):
         self._drop_tts_results = False
         self.current_weather = {}
         self.interaction_locked = False
+        self._cleanup_started = False
         self.state = self._load_state()
         if self.config.sovits_enabled:
             log("[Main] SoVITS startup begin.")
@@ -186,12 +187,20 @@ class ApplicationController(QObject):
             if not self.sovits_manager.start(timeout=60, kill_existing=self.config.sovits_kill_existing):
                 QMessageBox.critical(None, "SoVITS Error", "无法启动 GPT-SoVITS 服务，请检查配置。")
                 sys.exit(1)
-        self.llm_backend = LLMBackend(self.config, log_path=llm_log_file)
+        self.mcp_manager = MCPManager(self.config)
+        self.llm_backend = LLMBackend(self.config, log_path=llm_log_file, mcp_manager=self.mcp_manager)
         self.tts_backend = TTSBackend(self.config, sovits_log_path=sovits_log_path)
         self.stt_backend = STTBackend(self.config)
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
         self._loop_thread.start()
+        if self.config.mcp_enabled:
+            log("[Main] MCP startup begin.")
+            future = asyncio.run_coroutine_threadsafe(self.mcp_manager.start(), self._loop)
+            try:
+                future.result(timeout=self.config.mcp_startup_timeout + 5)
+            except Exception as e:
+                log(f"[Main] MCP startup failed: {e}")
         self.audio_player = AudioPlayer(self)
         self.audio_player.playback_finished.connect(self._on_audio_finished)
         self.main_window = MainWindow(self.config)
@@ -820,12 +829,25 @@ class ApplicationController(QObject):
             if self.main_window:
                 self.main_window.refresh_from_config()
     def cleanup(self):
-        if self._mocker_process: self._mocker_process.terminate()
-        if self.behavior_monitor: self.behavior_monitor.stop()
-        if self.sovits_manager: self.sovits_manager.stop()
-        self.stt_backend.cleanup()
-        cleanup_manager.cleanup()
-        self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._cleanup_started:
+            return
+        self._cleanup_started = True
+
+        def _cleanup_task():
+            if self._mocker_process:
+                self._mocker_process.terminate()
+            if self.behavior_monitor:
+                self.behavior_monitor.stop()
+            if self.sovits_manager:
+                self.sovits_manager.stop()
+            self.stt_backend.cleanup()
+            cleanup_manager.cleanup()
+            try:
+                self._loop.call_soon_threadsafe(self._loop.stop)
+            except Exception:
+                pass
+
+        threading.Thread(target=_cleanup_task, daemon=True).start()
     @property
     def state_path(self) -> Path:
         pack_dir = self.config.pack_manager.packs_dir / self.config.pack_manager.active_pack_id
