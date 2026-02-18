@@ -26,6 +26,26 @@ Please obtain resource packs compatible with this program on your own.
 - **Speech Recognition Component**: The `setup.ps1` installation script in this project downloads and uses the SenseVoiceSmall speech recognition model developed and open-sourced by Alibaba Group (FunASR), following the FunASR Model License 1.1. This script uses the ONNX converted version provided by the k2-fsa / sherpa-onnx project.
 - **Project Focus**: Focused on a high-efficiency, lightweight dialogue experience. There are currently no plans to add Live2D support, real-time screen recognition, or complex favorability systems.
 
+## 🤖 MCP (Model Context Protocol) Support & Warnings
+
+This project supports the Model Context Protocol (MCP), allowing the LLM to call local tools (such as file operations, screenshot OCR, command line execution, etc.).
+
+### ⚠️ High Risk Warning & Disclaimer
+
+1.  **Surge in Token Consumption**:
+    *   When MCP is enabled, the LLM's System Prompt will automatically inject a large number of Tool Definitions.
+    *   These tool definitions will be included in every conversation turn, **which will significantly increase Input Token consumption**.
+    *   If your LLM billing is expensive, please enable this with caution.
+
+2.  **Security Risks**:
+    *   The pre-configured MCP tools in this project (such as `filesystem_tools`, `command_proxy`) have **extremely high system permissions** (read/write files, execute arbitrary Shell commands).
+    *   **Strictly prohibited** for use in public environments or with untrusted LLM models.
+    *   **Strictly prohibited** to modify the Prompt to induce the LLM to perform malicious operations.
+
+3.  **Disclaimer**:
+    *   The author of this project **assumes no responsibility** for any file loss, system damage, privacy leakage, or other issues caused by users enabling MCP, using untrusted MCP servers, or modifying Prompts.
+    *   The MCP function is disabled by default. Enabling the MCP function means that you fully understand and voluntarily assume all the above risks.
+
 ## 📚 Detailed Documentation
 
 To help you better understand and use this project, we have prepared detailed documentation:

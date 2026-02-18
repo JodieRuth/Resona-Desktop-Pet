@@ -26,6 +26,26 @@
 - **语音识别组件**：项目中的 `setup.ps1` 安装脚本下载并使用的语音识别模型 SenseVoiceSmall 是由 Alibaba Group (FunASR) 开发并开源的，遵循 FunASR Model License 1.1。 该脚本使用了由 k2-fsa / sherpa-onnx 项目提供的 ONNX 转换版本。
 - **功能侧重**：专注于高效、轻量的对话体验，暂不计划加入 Live2D 演出、实时屏幕识别或复杂的好感度系统。
 
+## 🤖 MCP (Model Context Protocol) 支持与警告
+
+本项目支持 Model Context Protocol (MCP)，允许 LLM 调用本地工具（如文件操作、屏幕截图 OCR、命令行执行等）。
+
+### ⚠️ 高风险警告与免责声明
+
+1.  **Token 消耗激增**：
+    *   开启 MCP 后，LLM 的 System Prompt 会自动注入大量工具描述（Tool Definitions）。
+    *   每次对话都会携带这些工具描述，**这将导致 Input Token 消耗大幅增加**。
+    *   如果您的 LLM 计费昂贵，请务必慎重开启。
+
+2.  **安全风险**：
+    *   本项目预设的 MCP 工具（如 `filesystem_tools`、`command_proxy`）具有**极高的系统权限**（读写文件、执行任意 Shell 命令）。
+    *   **严禁**在公共环境或不可信的 LLM 模型上使用这些工具。
+    *   **严禁**修改 Prompt 诱导 LLM 进行恶意操作。
+
+3.  **免责声明**：
+    *   由于用户自行开启 MCP、使用不受信任的 MCP 服务器、或修改 Prompt 导致的文件丢失、系统损坏、隐私泄露等任何问题，**本项目作者不承担任何责任**。
+    *   MCP 功能默认关闭，开启 MCP 功能即代表您已充分了解并自愿承担上述所有风险。
+
 ## 📚 详细文档
 
 为了帮助您更深入地了解和使用本项目，我们准备了详细的分类文档：

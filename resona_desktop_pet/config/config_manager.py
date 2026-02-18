@@ -569,7 +569,7 @@ class ConfigManager:
 
     @property
     def mcp_max_tool_rounds(self) -> int:
-        return self.getint("MCP", "max_tool_rounds", 6)
+        return self.getint("MCP", "max_tool_rounds", 30)
 
 
     @property

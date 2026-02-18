@@ -748,7 +748,10 @@ class ApplicationController(QObject):
                         aud_dir = self.config.pack_manager.get_path("audio", "error_dir")
                         if aud_dir: audio = str(aud_dir / cfg["audio"])
             except: pass
-        self._trigger_voice_response(text, emotion, audio, is_behavior=True)
+        if self.config.disable_actions:
+            self.main_window.show_behavior_response_with_timeout(text, emotion)
+        else:
+            self._trigger_voice_response(text, emotion, audio, is_behavior=True)
         self._is_chain_executing = False
     def _replay_last_response(self):
         if not self._last_llm_response: return

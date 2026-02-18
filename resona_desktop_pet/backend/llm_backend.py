@@ -174,6 +174,20 @@ class LLMBackend:
         if self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
             system_prompt = f"{system_prompt}\n\n{self._get_mcp_system_instruction()}"
         
+        if self.config.tts_language == "ja":
+            ja_tts_instruction = (
+                "\n\n[CRITICAL TTS PRONUNCIATION RULES]\n"
+                "The user uses a Japanese TTS engine that CRASHES on non-Japanese characters.\n"
+                "For the 'text_tts' field, you MUST strictly follow these rules or the system will fail:\n"
+                "1. NO English alphabets (A-Z, a-z). Convert ALL English words to Katakana (e.g., 'Hello' -> 'ハロー', 'AI' -> 'エーアイ').\n"
+                "2. NO Arabic numerals (0-9). Convert ALL numbers to Kanji or Katakana reading (e.g., '123' -> '百二十三', '2024' -> '二千二十四').\n"
+                "3. NO symbols like '.' or ',' in numbers. Convert decimal points to 'テン' (e.g., '1.5' -> '一点五' or 'イチテンゴ').\n"
+                "4. ONLY use Kanji (漢字), Hiragana (ひらがな), Katakana (カタカナ), and Japanese punctuation (、。！？).\n"
+                "5. Example: 'Version 1.0 released!' -> 'バージョン一点零リリース！' (WRONG: 'Version 1.0 released!').\n"
+                "Ensure 'text_tts' is 100% pure Japanese script."
+            )
+            system_prompt = f"{system_prompt}{ja_tts_instruction}"
+
         messages.append({"role": "system", "content": system_prompt})
 
         question_blocks = []
@@ -556,7 +570,9 @@ class LLMBackend:
         max_tokens: int = 500
     ) -> LLMResponse:
         attempted_retry = False
-        for _ in range(max_tool_rounds + 1):
+        if max_tool_rounds <= 0:
+            return LLMResponse(error="Tool call exceeded max rounds")
+        for _ in range(max_tool_rounds):
             _, raw_text, reasoning, tool_calls = await self._call_litellm_raw(
                 messages,
                 model_name,
@@ -631,7 +647,7 @@ class LLMBackend:
 
             return LLMResponse(error="Empty response from LLM")
 
-        return LLMResponse(error="Tool call exceeded max rounds")
+        return LLMResponse(error=f"Tool call exceeded max rounds ({max_tool_rounds})")
 
     async def query(self, question: str) -> LLMResponse:
         llm_config = self.config.get_llm_config()
