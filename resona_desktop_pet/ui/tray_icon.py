@@ -63,6 +63,9 @@ class TrayIcon(QSystemTrayIcon):
         if self.main_window: self.main_window.settings_requested.emit()
 
     def _on_exit(self):
+        if self.main_window and self.main_window.controller and hasattr(self.main_window.controller, "force_exit"):
+            self.main_window.controller.force_exit()
+            return
         if self.main_window and self.main_window.controller:
             self.main_window.controller.cleanup()
         QApplication.quit()

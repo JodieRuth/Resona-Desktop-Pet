@@ -175,6 +175,7 @@ class ApplicationController(QObject):
         self.current_weather = {}
         self.interaction_locked = False
         self._cleanup_started = False
+        self._settings_dialog = None
         self.state = self._load_state()
         if self.config.sovits_enabled:
             log("[Main] SoVITS startup begin.")
@@ -611,8 +612,7 @@ class ApplicationController(QObject):
                 QTimer.singleShot(int(sec * 1000), restore)
         elif atype == "exit_app":
             log("[Main] Exit action triggered.")
-            self.cleanup()
-            QApplication.quit()
+            self.force_exit()
         else:
             if self.config.plugins_enabled:
                 pm = self.config.pack_manager
@@ -824,13 +824,62 @@ class ApplicationController(QObject):
                     elif f.is_dir(): shutil.rmtree(f)
                 except: pass
     def _show_settings(self):
-        from resona_desktop_pet.ui.simple_settings import SimpleSettingsDialog
-        if SimpleSettingsDialog(self.config).exec():
-            log("[Main] Config updated via settings dialog.")
-            self.config.load()
-            self.behavior_monitor.load_triggers()
-            if self.main_window:
-                self.main_window.refresh_from_config()
+        from resona_desktop_pet.ui.settings_dialog import SettingsDialog
+        if self._settings_dialog and self._settings_dialog.isVisible():
+            self._settings_dialog.raise_()
+            self._settings_dialog.activateWindow()
+            return
+        self._settings_dialog = SettingsDialog(self.config, parent=self.main_window)
+        self._settings_dialog.setModal(False)
+        self._settings_dialog.setWindowModality(Qt.NonModal)
+        self._settings_dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        self._settings_dialog.accepted.connect(self._on_settings_saved)
+        self._settings_dialog.finished.connect(lambda _: setattr(self, "_settings_dialog", None))
+        self._settings_dialog.show()
+        self._settings_dialog.raise_()
+        self._settings_dialog.activateWindow()
+
+    def _on_settings_saved(self):
+        log("[Main] Config updated via settings dialog.")
+        self.config.load()
+        self.behavior_monitor.load_triggers()
+        if self.main_window:
+            self.main_window.refresh_from_config()
+    def force_exit(self):
+        if self._cleanup_started:
+            os._exit(0)
+        self._cleanup_started = True
+        try:
+            if self._mocker_process:
+                self._mocker_process.terminate()
+        except Exception:
+            pass
+        try:
+            if self.behavior_monitor:
+                self.behavior_monitor.stop()
+                self.behavior_monitor.wait(2000)
+                if self.behavior_monitor.isRunning():
+                    self.behavior_monitor.terminate()
+        except Exception:
+            pass
+        try:
+            if self.sovits_manager:
+                self.sovits_manager.stop()
+        except Exception:
+            pass
+        try:
+            self.stt_backend.cleanup()
+        except Exception:
+            pass
+        try:
+            cleanup_manager.cleanup()
+        except Exception:
+            pass
+        try:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+        except Exception:
+            pass
+        os._exit(0)
     def cleanup(self):
         if self._cleanup_started:
             return
@@ -841,6 +890,9 @@ class ApplicationController(QObject):
                 self._mocker_process.terminate()
             if self.behavior_monitor:
                 self.behavior_monitor.stop()
+                self.behavior_monitor.wait(2000)
+                if self.behavior_monitor.isRunning():
+                    self.behavior_monitor.terminate()
             if self.sovits_manager:
                 self.sovits_manager.stop()
             self.stt_backend.cleanup()

@@ -474,9 +474,12 @@ class MainWindow(QWidget):
             return False
         if self.is_processing or self.is_listening or self.is_speaking or self.is_displaying_text:
             return False
-        if self.io.edit.hasFocus():
-            return False
         if QApplication.activeModalWidget():
+            return False
+        if QApplication.activePopupWidget():
+            return False
+        active_window = QApplication.activeWindow()
+        if active_window and active_window is not self:
             return False
         return True
 
@@ -572,6 +575,9 @@ class MainWindow(QWidget):
                 self.cancel_idle_fade()
             elif event.type() == QEvent.Leave:
                 QTimer.singleShot(100, self.schedule_idle_fade)
+            elif event.type() in (QEvent.KeyPress, QEvent.KeyRelease, QEvent.InputMethod):
+                self.cancel_idle_fade()
+                self.schedule_idle_fade()
         if event.type() == QEvent.Wheel and (on_character or on_overlay):
             we = event 
             mods = we.modifiers()
@@ -905,6 +911,11 @@ class MainWindow(QWidget):
         self._reinforce_topmost()
 
     def closeEvent(self, event):
+        controller = getattr(self, "controller", None)
+        if controller and hasattr(controller, "force_exit"):
+            controller.force_exit()
+            event.ignore()
+            return
         QApplication.instance().quit()
         super().closeEvent(event)
 

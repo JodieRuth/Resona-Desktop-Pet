@@ -237,6 +237,23 @@ class ConfigManager:
         return self.getfloat("General", "dialogue_clear_timeout", 5.0)
 
     @property
+    def dialog_color(self) -> str:
+        return self.get("General", "dialog_color", "0,0,0")
+
+    @property
+    def dialog_opacity(self) -> int:
+        val = self.getint("General", "dialog_opacity", 35)
+        return max(0, min(100, val))
+
+    @property
+    def dialog_font(self) -> str:
+        return self.get("General", "dialog_font", "")
+
+    @property
+    def dialog_text_color(self) -> str:
+        return self.get("General", "dialog_text_color", "255,255,255")
+        
+    @property
     def monitor_clipboard(self) -> bool:
         return self.get_bool("Advanced", "monitor_clipboard", True)
 
@@ -517,6 +534,10 @@ class ConfigManager:
     @property
     def sovits_model_version(self) -> str:
         return self.get("SoVITS", "model_version", "v2Pro")
+
+    @property
+    def sovits_model_dir(self) -> str:
+        return self.get("SoVITS", "model_dir", "./models/sovits")
 
     @property
     def sovits_temperature(self) -> float:

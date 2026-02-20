@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, QRect, Signal, QEvent, QObject, QTimer
-from PySide6.QtGui import QPainter, QColor, QFont, QKeyEvent, QResizeEvent, QPaintEvent
+from PySide6.QtGui import QPainter, QColor, QFont, QKeyEvent, QResizeEvent, QPaintEvent, QFontDatabase
 from PySide6.QtWidgets import QWidget, QTextEdit, QLabel, QFrame
 from typing import Optional
 import os
@@ -16,7 +16,8 @@ class IOOverlay(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         
-
+        self._font_loaded_family = None
+        self._loaded_font_path = None
         self.user_name = "User"
         self.char_name = "Resona"
         self.busy_header: Optional[str] = None
@@ -155,33 +156,110 @@ class IOOverlay(QWidget):
     def update_fonts(self):
 
         font_scale = 1.0
+        config = None
+        text_color = "white"
         try:
-
             if hasattr(self.parent(), 'config'):
-                font_scale = self.parent().config.font_scale
+                config = self.parent().config
+                font_scale = config.font_scale
+                
+                tc_str = config.dialog_text_color
+                if "," in tc_str:
+                    tc = self._parse_color(tc_str, 100)
+                    text_color = tc.name() 
+                elif tc_str.startswith("#"):
+                    text_color = tc_str
+                
         except: pass
+
+        style = f"color: {text_color};"
+        self.header.setStyleSheet(style)
+        self.body.setStyleSheet(style)
+        self.edit.setStyleSheet(f"background: transparent; {style}")
+
+        target_font_path = None
+        if config and config.dialog_font:
+            font_path = Path(config.dialog_font)
+            if not font_path.is_absolute():
+                font_path = Path(config.config_path).parent / font_path
+            target_font_path = str(font_path)
+            
+        if target_font_path != self._loaded_font_path:
+            self._loaded_font_path = target_font_path
+            self._font_loaded_family = None
+            
+            if target_font_path:
+                if os.path.exists(target_font_path):
+                    font_id = QFontDatabase.addApplicationFont(target_font_path)
+                    if font_id != -1:
+                        families = QFontDatabase.applicationFontFamilies(font_id)
+                        if families:
+                            self._font_loaded_family = families[0]
+                            print(f"[IOOverlay] Loaded custom font: {self._font_loaded_family}")
+                    else:
+                        print(f"[IOOverlay] Failed to load font: {target_font_path}")
+                else:
+                    print(f"[IOOverlay] Font file not found: {target_font_path}")
 
         h = self.height()
         header_h = max(18, h // 5)
         
         header_pixel_size = max(12, int(header_h * 0.6 * font_scale))
-        font = self.header.font()
+        
+        if self._font_loaded_family:
+            font = QFont(self._font_loaded_family)
+        else:
+            font = self.header.font()
+            
         font.setPixelSize(header_pixel_size)
         self.header.setFont(font)
         
         content_pixel_size = max(12, int(h * 0.12 * font_scale))
-        font_c = self.edit.font()
+        
+        if self._font_loaded_family:
+            font_c = QFont(self._font_loaded_family)
+        else:
+            font_c = self.edit.font()
+            
         font_c.setPixelSize(content_pixel_size)
         self.edit.setFont(font_c)
         self.body.setFont(font_c)
         
+    def _parse_color(self, color_str: str, opacity_percent: int) -> QColor:
+        alpha = int((opacity_percent / 100.0) * 255)
+        alpha = max(0, min(255, alpha))
+        
+        color_str = color_str.strip()
+        
+        if color_str.startswith("#"):
+            c = QColor(color_str)
+            c.setAlpha(alpha)
+            return c
+            
+        if "," in color_str:
+            try:
+                parts = [int(p.strip()) for p in color_str.split(",")]
+                if len(parts) >= 3:
+                    return QColor(parts[0], parts[1], parts[2], alpha)
+            except: pass
+            
+        return QColor(0, 0, 0, alpha)
+
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         
         rad = max(8, self.height() // 10)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 90))
+        
+        bg_color = QColor(0, 0, 0, 90) 
+        try:
+            if hasattr(self.parent(), 'config'):
+                cfg = self.parent().config
+                bg_color = self._parse_color(cfg.dialog_color, cfg.dialog_opacity)
+        except: pass
+        
+        painter.setBrush(bg_color)
         
         painter.drawRoundedRect(self.rect(), rad, rad)
         

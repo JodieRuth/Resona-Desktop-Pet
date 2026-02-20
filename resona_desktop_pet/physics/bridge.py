@@ -189,6 +189,10 @@ class PhysicsBridge(QObject):
 
         if self.config.physics_collide_windows:
             ignore_hwnds = [self.target.winId()]
+            controller = getattr(self.target, "controller", None)
+            settings_dialog = getattr(controller, "_settings_dialog", None) if controller else None
+            if settings_dialog and settings_dialog.isVisible():
+                ignore_hwnds.append(settings_dialog.winId())
             rects = EnvironmentScanner.get_window_rects(
                 ignore_hwnds=ignore_hwnds,
                 ignore_maximized=self.config.physics_ignore_maximized_windows,
