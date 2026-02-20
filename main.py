@@ -64,9 +64,6 @@ class TeeLogger:
     def flush(self):
         self.terminal.flush()
         self.log_file.flush()
-sys.stdout = TeeLogger(log_file, sys.stdout)
-sys.stderr = sys.stdout
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s', handlers=[logging.StreamHandler(sys.stdout)], force=True)
 def log(message):
     logging.info(message)
 class AudioPlayer(QObject):
@@ -87,6 +84,262 @@ class AudioPlayer(QObject):
     def _on_status_changed(self, status):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.playback_finished.emit()
+
+class TimerScheduler(QObject):
+    def __init__(self, controller):
+        super().__init__(controller)
+        self.controller = controller
+        self.config = controller.config
+        self.project_root = controller.project_root
+        self.enabled = self.config.timer_enabled
+        self.poll_interval = max(0.1, float(self.config.timer_poll_interval))
+        self.inbox_path = self._resolve_path(self.config.timer_inbox_file)
+        self.tasks_path = self._resolve_path(self.config.timer_tasks_file)
+        self.pre_synthesize = self.config.timer_pre_synthesize
+        self.tts_idle_sec = max(0.0, float(self.config.timer_tts_idle_sec))
+        self.trigger_delay = max(0.0, float(self.config.timer_trigger_delay))
+        self._synth_inflight_id = None
+        self._synth_inflight_started_at = None
+        self._synth_inflight_last_log_at = None
+        self._last_busy = False
+        self._busy_released_at = None
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        if self.enabled:
+            self._timer.start(int(self.poll_interval * 1000))
+
+    def refresh_config(self):
+        self.enabled = self.config.timer_enabled
+        self.poll_interval = max(0.1, float(self.config.timer_poll_interval))
+        self.pre_synthesize = self.config.timer_pre_synthesize
+        self.tts_idle_sec = max(0.0, float(self.config.timer_tts_idle_sec))
+        self.trigger_delay = max(0.0, float(self.config.timer_trigger_delay))
+        self.inbox_path = self._resolve_path(self.config.timer_inbox_file)
+        self.tasks_path = self._resolve_path(self.config.timer_tasks_file)
+        if self.enabled:
+            if not self._timer.isActive():
+                self._timer.start(int(self.poll_interval * 1000))
+        else:
+            self._timer.stop()
+
+    def reset(self):
+        self._synth_inflight_id = None
+        self._synth_inflight_started_at = None
+        self._synth_inflight_last_log_at = None
+        self._last_busy = False
+        self._busy_released_at = None
+        self._write_json(self.inbox_path, [])
+        self._write_json(self.tasks_path, [])
+
+    def _resolve_path(self, value: str) -> Path:
+        path = Path(value)
+        if not path.is_absolute():
+            path = self.project_root / path
+        return path
+
+    def _load_json(self, path: Path) -> list:
+        if not path.exists():
+            return []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data
+        except Exception as e:
+            log(f"[Timer] Failed to read {path}: {e}")
+        return []
+
+    def _write_json(self, path: Path, data: list):
+        try:
+            if path.parent and not path.parent.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            log(f"[Timer] Failed to write {path}: {e}")
+
+    def _normalize_task(self, entry: dict, now: float) -> dict:
+        task_id = entry.get("id") or f"timer_{int(now * 1000)}_{random.randint(1000, 9999)}"
+        delay_val = entry.get("time", entry.get("delay", entry.get("delay_sec", 0)))
+        try:
+            delay_sec = float(delay_val)
+        except (TypeError, ValueError):
+            delay_sec = 0.0
+        due_at = entry.get("due_at")
+        if due_at is None:
+            due_at = now + max(0.0, delay_sec)
+        try:
+            due_at = float(due_at)
+        except (TypeError, ValueError):
+            due_at = now
+        return {
+            "id": task_id,
+            "created_at": float(entry.get("created_at", now)),
+            "due_at": due_at,
+            "emotion": entry.get("emotion", "<E:smile>"),
+            "text_display": entry.get("text_display", ""),
+            "text_tts": entry.get("text_tts", ""),
+            "audio_path": entry.get("audio_path", ""),
+            "status": entry.get("status", "pending")
+        }
+
+    def _tts_idle(self, now: float) -> bool:
+        return (now - self.controller._tts_activity_at) >= self.tts_idle_sec
+
+    def _ready_to_trigger(self, now: float) -> bool:
+        if self._busy_released_at is None:
+            return True
+        return now >= self._busy_released_at + self.trigger_delay
+
+    def _tick(self):
+        if not self.enabled:
+            return
+        now = time.time()
+        busy = self.controller.main_window.is_busy
+        if self._last_busy and not busy:
+            self._busy_released_at = now
+        self._last_busy = busy
+
+        tasks = self._load_json(self.tasks_path)
+        inbox = self._load_json(self.inbox_path)
+        if inbox:
+            for entry in inbox:
+                if isinstance(entry, dict):
+                    tasks.append(self._normalize_task(entry, now))
+            self._write_json(self.inbox_path, [])
+
+        if self.pre_synthesize and not busy and self._tts_idle(now) and self._synth_inflight_id is None:
+            for task in tasks:
+                if task.get("status") in ["pending", "ready"] and not task.get("audio_path"):
+                    log(f"[Timer] Pre-synthesize queued. id={task.get('id')} due_at={task.get('due_at')}")
+                    self._start_synthesize(task)
+                    break
+
+        updated = False
+        kept = []
+        for task in tasks:
+            status = task.get("status", "pending")
+            if status in ["done", "failed"]:
+                updated = True
+                continue
+            due_at = task.get("due_at", now)
+            try:
+                due_at = float(due_at)
+            except (TypeError, ValueError):
+                due_at = now
+            if now >= due_at:
+                log(f"[Timer] Task due. id={task.get('id')} status={status} audio={bool(task.get('audio_path'))} busy={busy}")
+                if busy or not self._ready_to_trigger(now):
+                    log(f"[Timer] Task delayed (busy or cooldown). id={task.get('id')}")
+                    task["status"] = "ready"
+                    task.setdefault("ready_since", now)
+                    kept.append(task)
+                    updated = True
+                    continue
+                if self._trigger_task(task):
+                    log(f"[Timer] Task triggered and removed. id={task.get('id')}")
+                    updated = True
+                    continue
+                task["status"] = "ready"
+                kept.append(task)
+                updated = True
+                continue
+            kept.append(task)
+
+        if inbox or updated:
+            self._write_json(self.tasks_path, kept)
+
+    def _trigger_task(self, task: dict) -> bool:
+        text = task.get("text_display", "")
+        emotion = task.get("emotion", "<E:smile>")
+        task_id = task.get("id")
+        audio_path = task.get("audio_path")
+        if audio_path:
+            path = Path(audio_path)
+            if path.exists():
+                log(f"[Timer] Playing pre-synth audio. id={task_id} path={path}")
+                self.controller._trigger_voice_response(text, emotion, voice_file=str(path), is_behavior=False)
+                return True
+            log(f"[Timer] Audio path missing. id={task_id} path={path}")
+        timed_out = False
+        if self.pre_synthesize:
+            if self._synth_inflight_id is not None:
+                if task_id and self._synth_inflight_id == task_id:
+                    now = time.time()
+                    started_at = self._synth_inflight_started_at or now
+                    timeout_sec = max(5.0, float(self.config.sovits_timeout) + 5.0)
+                    elapsed = now - started_at
+                    if elapsed >= timeout_sec:
+                        log(f"[Timer] Synth timeout, falling back to text. id={task_id} waited={elapsed:.1f}s")
+                        self._synth_inflight_id = None
+                        self._synth_inflight_started_at = None
+                        self._synth_inflight_last_log_at = None
+                        timed_out = True
+                    else:
+                        last_log_at = self._synth_inflight_last_log_at or 0.0
+                        if now - last_log_at >= 5.0:
+                            log(f"[Timer] Awaiting synth result. id={task_id} waited={elapsed:.1f}s")
+                            self._synth_inflight_last_log_at = now
+                        return False
+                if self._synth_inflight_id is not None:
+                    log(f"[Timer] Synth busy with another task. id={task_id} inflight={self._synth_inflight_id}")
+                    return False
+            if not timed_out and self._tts_idle(time.time()) and not self.controller.main_window.is_busy:
+                log(f"[Timer] Trigger requests synth. id={task_id}")
+                self._start_synthesize(task)
+                return False
+        self.controller.main_window.show_behavior_response_with_timeout(text, emotion)
+        log(f"[Timer] Trigger fell back to text. id={task_id}")
+        return True
+
+    async def _synthesize_task(self, task: dict):
+        self.controller._mark_tts_activity()
+        text = task.get("text_tts") or task.get("text_display") or ""
+        emotion = task.get("emotion", "<E:smile>")
+        result = await self.controller.tts_backend.synthesize(text, emotion)
+        return result
+
+    def _start_synthesize(self, task: dict):
+        task_id = task.get("id")
+        if not task_id:
+            return
+        self._synth_inflight_id = task_id
+        self._synth_inflight_started_at = time.time()
+        self._synth_inflight_last_log_at = self._synth_inflight_started_at
+        log(f"[Timer] Synth start. id={task_id} text_tts_len={len(task.get('text_tts') or '')}")
+        self.controller._mark_tts_activity()
+        future = asyncio.run_coroutine_threadsafe(self._synthesize_task(task), self.controller._loop)
+        def _done(fut):
+            QTimer.singleShot(0, self, lambda: self._on_synthesize_done(task_id, fut))
+        future.add_done_callback(_done)
+
+    def _on_synthesize_done(self, task_id: str, future):
+        self._synth_inflight_id = None
+        self._synth_inflight_started_at = None
+        self._synth_inflight_last_log_at = None
+        error = None
+        result = None
+        try:
+            result = future.result()
+        except Exception as e:
+            error = str(e)
+        tasks = self._load_json(self.tasks_path)
+        updated = False
+        for task in tasks:
+            if task.get("id") != task_id:
+                continue
+            if result and getattr(result, "audio_path", None):
+                task["audio_path"] = result.audio_path
+                task["status"] = task.get("status", "pending")
+                log(f"[Timer] Synth done. id={task_id} path={result.audio_path}")
+            else:
+                task["status"] = "failed"
+                task["error"] = error or getattr(result, "error", "unknown_error")
+                log(f"[Timer] Synth failed. id={task_id} error={task.get('error')}")
+            updated = True
+            break
+        if updated:
+            self._write_json(self.tasks_path, tasks)
 class ApplicationController(QObject):
     llm_response_ready = Signal(object)
     tts_ready = Signal(object)
@@ -110,6 +363,7 @@ class ApplicationController(QObject):
             log("[Debug] CRITICAL: Pack data is empty! Check pack.json path and ID.")
         self.project_root = Path(self.config.config_path).parent
         self._cleanup_temp_dir()
+        self._tts_activity_at = time.time()
 
         self.gpu_vendor = "Unknown"
         self.can_monitor_gpu = True
@@ -206,8 +460,10 @@ class ApplicationController(QObject):
         self.audio_player.playback_finished.connect(self._on_audio_finished)
         self.main_window = MainWindow(self.config)
         self.main_window.controller = self
+        self.timer_scheduler = TimerScheduler(self)
 
         self.tray_icon = TrayIcon(self.main_window)
+        self.tray_icon.add_menu_action("Replay Last Response", self._replay_last_response)
         self.tray_icon.show()
 
         self.debug_panel = None
@@ -305,6 +561,8 @@ class ApplicationController(QObject):
             log("[Watchdog] BUSY state timeout! Force unlocking to prevent freeze.")
             self._is_chain_executing = False
             self.main_window.finish_processing()
+    def _mark_tts_activity(self):
+        self._tts_activity_at = time.time()
     def _handle_user_query(self, text: str):
         if not text.strip(): return
         log(f"[Main] User query received: {text}")
@@ -338,17 +596,20 @@ class ApplicationController(QObject):
         if self._drop_tts_results or self._pack_switch_pending:
             log("[Main] Dropping TTS result due to pack switch.")
             return
+        self._mark_tts_activity()
         self.main_window.show_response(self._current_text, self._current_emotion)
         if result.error:
             self._show_error_response("sovits_timeout_error", result.error)
             return
         if result.audio_path:
+            self._mark_tts_activity()
             self.audio_player.play(result.audio_path)
         else:
             QTimer.singleShot(2000, self.main_window.finish_processing)
     def _on_audio_finished(self):
         try:
             log("[Main] Audio playback finished.")
+            self._mark_tts_activity()
             self.main_window.set_speaking(False)
             self.main_window.on_audio_complete()
             self._busy_watchdog.stop()
@@ -360,8 +621,13 @@ class ApplicationController(QObject):
             return
         v_path = None
         if voice_file:
-            pack_audio_path = self.config.pack_manager.get_path("audio", "event_dir")
-            v_path = (pack_audio_path / voice_file) if pack_audio_path else Path(voice_file)
+            voice_path = Path(voice_file)
+            if voice_path.is_absolute():
+                v_path = voice_path
+                pack_audio_path = None
+            else:
+                pack_audio_path = self.config.pack_manager.get_path("audio", "event_dir")
+                v_path = (pack_audio_path / voice_file) if pack_audio_path else voice_path
             
             if not v_path.exists() and pack_audio_path and pack_audio_path.exists():
                 search_name = Path(voice_file).name
@@ -375,16 +641,19 @@ class ApplicationController(QObject):
             log(f"[Main] Playing pre-recorded: {v_path}")
             self.main_window.set_speaking(True)
             self.main_window.show_response(text, emotion)
+            self._mark_tts_activity()
             self.audio_player.play(str(v_path))
         elif self.config.sovits_enabled and not is_behavior:
             log("[Main] Handing over to SoVITS synthesis chain.")
             self.main_window.set_speaking(True)
+            self._mark_tts_activity()
             asyncio.run_coroutine_threadsafe(self._generate_tts(tts_text or text, emotion, language=tts_lang), self._loop)
         else:
             log("[Main] No audio source available, showing text response with timeout.")
             self.main_window.show_behavior_response_with_timeout(text, emotion)
     async def _generate_tts(self, text: str, emotion: str, language: Optional[str] = None):
         get_sovits_logger()
+        self._mark_tts_activity()
 
         if not language and self.config.use_pack_settings:
             language = self.config.pack_manager.get_info("tts_language", "ja")
@@ -627,6 +896,8 @@ class ApplicationController(QObject):
         log(f"[PackSwitch] Start: requested={pack_id} current_active={self.config.pack_manager.active_pack_id} project_root={self.project_root}")
         self._cancel_action_chain()
         self.main_window.hide()
+        if hasattr(self, "timer_scheduler"):
+            self.timer_scheduler.reset()
         
         self.config.pack_manager.set_active_pack(pack_id)
         self.config.pack_manager.load_plugins(self.config.plugins_enabled)
@@ -723,6 +994,8 @@ class ApplicationController(QObject):
             self._pack_switch_pending = False
             self._drop_tts_results = False
             self.config.load()
+            if hasattr(self, "timer_scheduler"):
+                self.timer_scheduler.refresh_config()
             print(f"[PackSwitch] Finalize config: active_pack={self.config.get('General','active_pack','')} default_outfit={self.config.default_outfit}")
             self.main_window.refresh_from_config()
             
@@ -843,6 +1116,8 @@ class ApplicationController(QObject):
         log("[Main] Config updated via settings dialog.")
         self.config.load()
         self.behavior_monitor.load_triggers()
+        if hasattr(self, "timer_scheduler"):
+            self.timer_scheduler.refresh_config()
         if self.main_window:
             self.main_window.refresh_from_config()
     def force_exit(self):
@@ -941,8 +1216,9 @@ def main():
         sovits_log_file = log_dir / f"sovits_{ts_part}.log"
         llm_log_file = log_dir / f"llm_{ts_part}.log"
         
-    sys.stdout = TeeLogger(log_file, sys.stdout)
-    sys.stderr = sys.stdout
+    if not isinstance(sys.stdout, TeeLogger):
+        sys.stdout = TeeLogger(log_file, sys.stdout)
+        sys.stderr = sys.stdout
     logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s', handlers=[logging.StreamHandler(sys.stdout)], force=True)
 
     config = ConfigManager(str(project_root / "config.cfg"))

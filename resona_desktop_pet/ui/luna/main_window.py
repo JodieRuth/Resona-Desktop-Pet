@@ -474,6 +474,12 @@ class MainWindow(QWidget):
             return False
         if self.is_processing or self.is_listening or self.is_speaking or self.is_displaying_text:
             return False
+        if self.io and self.io.edit:
+            if self.io.edit.hasFocus():
+                return False
+            if self.io.edit.isVisible() and self.io.edit.isEnabled():
+                if self.io.edit.toPlainText().strip():
+                    return False
         if QApplication.activeModalWidget():
             return False
         if QApplication.activePopupWidget():

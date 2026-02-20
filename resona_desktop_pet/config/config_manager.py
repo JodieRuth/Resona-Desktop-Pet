@@ -594,6 +594,35 @@ class ConfigManager:
 
 
     @property
+    def timer_enabled(self) -> bool:
+        return self.getboolean("Timer", "enabled", False)
+
+    @property
+    def timer_poll_interval(self) -> float:
+        return self.getfloat("Timer", "poll_interval", 0.5)
+
+    @property
+    def timer_inbox_file(self) -> str:
+        return self.get("Timer", "inbox_file", "TEMP/timer_inbox.json")
+
+    @property
+    def timer_tasks_file(self) -> str:
+        return self.get("Timer", "tasks_file", "TEMP/timer_tasks.json")
+
+    @property
+    def timer_pre_synthesize(self) -> bool:
+        return self.getboolean("Timer", "pre_synthesize", True)
+
+    @property
+    def timer_tts_idle_sec(self) -> float:
+        return self.getfloat("Timer", "tts_idle_sec", 2.0)
+
+    @property
+    def timer_trigger_delay(self) -> float:
+        return self.getfloat("Timer", "trigger_delay", 2.0)
+
+
+    @property
     def monitor_clipboard(self) -> bool:
         return self.get_bool("General", "monitor_clipboard", True)
 
