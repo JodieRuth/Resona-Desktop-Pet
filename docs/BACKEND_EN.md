@@ -30,5 +30,30 @@ Manages the SoVITS background process.
 - **Lifecycle Management**: Automatically locates the `GPT-SoVITS` path, starts the API server on launch, and cleans up processes on exit.
 - **Runtime Support**: Supports starting via the project's built-in streamlined runtime environment.
 
+## 5. MCP Manager (`mcp_manager.py`)
+Responsible for Model Context Protocol service management and tool scheduling.
+- **Auto-Discovery**: Scans `mcpserver/` directory for `.mcp.json/py/js` files on startup, loading and starting corresponding MCP Servers.
+- **Tool Injection**: Converts all discovered tools into LLM-understandable Schemas and injects them into the System Prompt.
+- **Security Sandbox**: Communicates with subprocesses via `stdio` pipes, isolating the tool execution environment (though tools themselves may have high privileges, beware of risks with `command_proxy`).
+- **Built-in Tools**:
+  - `filesystem_tools`: File reading, writing, searching, editing.
+  - `command_proxy`: Executes system Shell commands.
+  - `timer_inbox`: Writes scheduled tasks to a JSON inbox, polled by the main loop.
+  - `ocr_tools`: Calls OCR interfaces to recognize screen content (as a tool call, not passive injection).
+
+## 6. Web Server (`web_server/`)
+Local Web service built on FastAPI.
+- **API Service**: Provides HTTP interfaces and static file serving.
+- **WebSocket (`server.py`)**: Core communication channel supporting persistent connections between clients (e.g., Web UI) and the backend.
+  - **State Synchronization**: Pushes pet expression, action, and voice status in real-time.
+  - **Remote Control**: Receives commands from clients to control pet behavior.
+- **Session Management (`session_manager.py`)**: Supports multi-client connection management.
+
+## 7. Physics Engine (`physics/`)
+Located in `resona_desktop_pet/physics/`, providing experimental physics simulation.
+- **Verlet Integration**: Uses Verlet algorithm to simulate particle motion trajectories.
+- **Collision Detection**: Detects screen edges (`ScreenBoundary`) and window rectangles for bounce effects.
+- **State Machine Integration**: Physics states (e.g., "Dragging", "Flying", "Landing") are decoupled but interoperable with the pet's main logic state machine.
+
 ---
 Parts of this document were generated with the assistance of large language models, and translations were also completed by large language models. Any deviations do not represent the author's true intent.

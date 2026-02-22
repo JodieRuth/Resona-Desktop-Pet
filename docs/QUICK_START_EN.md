@@ -30,6 +30,10 @@ Follow these steps to get your ResonaDesktopPet up and running in minutes.
 4. **SoVITS Config**:
    - Ensure you have extracted the SoVITS integrated package to the correct path as per the README.
    - Set `sovits_enabled = true`.
+5. **Enable MCP (Advanced/Optional)**:
+   - Add an `[MCP]` section to `config.cfg`.
+   - Set `enabled = true`.
+   - **Note**: Enabling this grants the LLM file read/write and command execution permissions, and will significantly increase Token consumption. Ensure you understand the risks.
 
 ## 3. Launch
 - Double-click `run.bat`.

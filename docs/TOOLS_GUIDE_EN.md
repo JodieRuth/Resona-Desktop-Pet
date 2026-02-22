@@ -34,5 +34,12 @@ A powerful tool for debugging triggers.
   3. Enter an Outfit ID.
   4. Click generate; it will copy files to the correct pack directory and create the index.
 
+## 5. MCP Toolset (`mcpserver/`)
+These scripts are not run directly but are loaded by the main program as MCP Servers for LLM invocation.
+- **`filesystem_tools.mcp.py`**: Provides file system read/write capabilities.
+- **`command_proxy.mcp.py`**: Provides command line execution capabilities.
+- **`timer_inbox.mcp.py`**: Provides scheduled task management capabilities.
+- **Developer Guide**: If you want to extend AI capabilities (e.g., controlling smart home devices), refer to the format of these files to write new `.mcp.py` scripts and place them in the `mcpserver/` directory for automatic loading.
+
 ---
 Parts of this document were generated with the assistance of large language models, and translations were also completed by large language models. Any deviations do not represent the author's true intent.

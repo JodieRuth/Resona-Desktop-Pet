@@ -64,6 +64,9 @@ To help you better understand and use this project, we have prepared detailed do
 
 - **Deep Interaction**: Connects to cloud or local LLMs to give your pet a unique personality and dialogue capabilities.
 - **Full Voice Support**: High-quality voice output via SoVITS and semi-real-time voice dialogue via STT.
+- **MCP Extension Support**: Supports Model Context Protocol, allowing LLMs to invoke local tools (file operations, command line, scheduled reminders, etc.) for Agent capabilities.
+- **Web Service Interface**: Built-in FastAPI server supporting WebSocket connections for remote control or Web UI extensions.
+- **Physics Engine (Experimental)**: Built-in simple physics engine supporting gravity, collision, and drag inertia, giving the pet a more tangible presence.
 - **Low-End Friendly**: Can run theoretically without a GPU by using cloud LLMs and setting SoVITS to CPU mode.
 - **Automated Deployment**: Provides a comprehensive installation script that supports one-click configuration of virtual environments. A Runtime environment option is available for beginners.
 
