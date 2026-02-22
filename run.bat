@@ -37,6 +37,18 @@ pause
 exit /b
 
 :START
+ffmpeg -version >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [Resona] Using system FFmpeg
+) else (
+    if exist "ffmpeg\bin\ffmpeg.exe" (
+        set "PATH=%~dp0ffmpeg\bin;%PATH%"
+        echo [Resona] Added local FFmpeg to PATH
+    ) else (
+        echo [WARNING] FFmpeg not found in system PATH or local directory! Audio functions may fail.
+    )
+)
+
 echo [Resona] Using environment: %PYTHON_EXEC%
 %PYTHON_EXEC% main.py
 if %errorlevel% neq 0 (

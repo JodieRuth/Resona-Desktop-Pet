@@ -9,6 +9,7 @@ $PIP_GET_URL = 'https://bootstrap.pypa.io/get-pip.py'
 $SOVITS_URL = 'https://hf-mirror.com/datasets/JodieRuth/test123/resolve/main/GPT-SoVITS-v2pro-20250604.zip'
 $PACK_URL = 'https://hf-mirror.com/datasets/JodieRuth/test1/resolve/main/Resona_Default.zip'
 $STT_URL = 'https://gh-proxy.com/https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2'
+$FFMPEG_URL = 'https://gh-proxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
 
 $DISCLAIMER = @'
 *******************************************************************************
@@ -95,7 +96,8 @@ Write-Host "[Resona] Installing requirements..."
 # --- 3. Downloads ---
 
 # SoVITS
-if (!(Test-Path 'GPT-SoVITS\GPT-SoVITS-v2pro-20250604')) {
+# Check for key file to ensure integrity
+if (!(Test-Path 'GPT-SoVITS\GPT-SoVITS-v2pro-20250604\api_v2.py')) {
     Write-Host "`n[Resona] Downloading SoVITS Engine (~7.7GB)..." -ForegroundColor Cyan
     if (!(Test-Path 'GPT-SoVITS')) { New-Item -ItemType Directory -Path 'GPT-SoVITS' }
     $curlArgs = @("-L", "-f", "-C", "-", $SOVITS_URL, "-o", "sovits.zip", "--retry", "5")
@@ -112,7 +114,7 @@ if (!(Test-Path 'GPT-SoVITS\GPT-SoVITS-v2pro-20250604')) {
 }
 
 # Assets Pack
-if (!(Test-Path 'packs\Resona_Default')) {
+if (!(Test-Path 'packs\Resona_Default\pack.json')) {
     Write-Host "`n[Resona] Downloading Assets Pack..." -ForegroundColor Cyan
     if (!(Test-Path 'packs')) { New-Item -ItemType Directory -Path 'packs' }
     $curlArgs = @("-L", "-f", "-C", "-", $PACK_URL, "-o", "pack.zip", "--retry", "5")
@@ -124,7 +126,15 @@ if (!(Test-Path 'packs\Resona_Default')) {
 }
 
 # STT Model
-if (!(Test-Path 'models\stt\sensevoice')) {
+$sttInstalled = $false
+if (Test-Path 'models\stt\sensevoice\model.int8.onnx') { $sttInstalled = $true }
+if (Test-Path 'models\stt\sensevoice\zh.onnx') { $sttInstalled = $true }
+if (!$sttInstalled) {
+    $hasOnnx = Get-ChildItem -Path 'models\stt\sensevoice' -Filter *.onnx -Recurse -ErrorAction SilentlyContinue
+    if ($hasOnnx) { $sttInstalled = $true }
+}
+
+if (!$sttInstalled) {
     Write-Host "`n[Resona] Downloading STT Model..." -ForegroundColor Cyan
     if (!(Test-Path 'models\stt')) { New-Item -ItemType Directory -Path 'models\stt' }
     $curlArgs = @("-L", "-f", "-C", "-", $STT_URL, "-o", "stt_model.tar.bz2", "--retry", "5")
@@ -133,6 +143,25 @@ if (!(Test-Path 'models\stt\sensevoice')) {
         if (!(Test-Path 'models\stt\sensevoice')) { New-Item -ItemType Directory -Path 'models\stt\sensevoice' }
         & tar.exe -xvf stt_model.tar.bz2 -C models\stt\sensevoice --strip-components 1
         Remove-Item 'stt_model.tar.bz2'
+    }
+}
+
+# FFmpeg
+if (!(Test-Path 'ffmpeg\bin\ffmpeg.exe')) {
+    Write-Host "`n[Resona] Downloading FFmpeg..." -ForegroundColor Cyan
+    $curlArgs = @("-L", "-f", "-C", "-", $FFMPEG_URL, "-o", "ffmpeg.zip", "--retry", "5")
+    & curl.exe @curlArgs
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host '[Resona] Extracting FFmpeg...'
+        Expand-Archive -Path 'ffmpeg.zip' -DestinationPath 'ffmpeg_temp' -Force
+        Remove-Item 'ffmpeg.zip'
+        
+        $innerFolder = Get-ChildItem -Path 'ffmpeg_temp' -Directory | Select-Object -First 1
+        if ($innerFolder) {
+            if (Test-Path 'ffmpeg') { Remove-Item 'ffmpeg' -Recurse -Force }
+            Move-Item -Path $innerFolder.FullName -Destination 'ffmpeg'
+            Remove-Item 'ffmpeg_temp' -Recurse -Force
+        }
     }
 }
 

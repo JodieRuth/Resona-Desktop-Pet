@@ -9,6 +9,7 @@ $PACK_URL = 'https://huggingface.co/datasets/JodieRuth/test1/resolve/main/Resona
 # External Dependency: SenseVoiceSmall (by Alibaba FunASR)
 # Distribution & Conversion by k2-fsa/sherpa-onnx (Apache-2.0)
 $STT_URL = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2'
+$FFMPEG_URL = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
 
 # --- GPU Detection ---
 $gpus = Get-CimInstance Win32_VideoController
@@ -50,6 +51,7 @@ if ($useMirror -eq 'Y' -or $useMirror -eq 'y') {
     $PACK_URL = $PACK_URL -replace 'huggingface.co', 'hf-mirror.com'
     # GitHub Mirror
     $STT_URL = "https://gh-proxy.com/" + $STT_URL
+    $FFMPEG_URL = "https://gh-proxy.com/" + $FFMPEG_URL
     Write-Host "[Resona] Using Mirrors: hf-mirror.com & gh-proxy.com" -ForegroundColor Cyan
 }
 
@@ -176,20 +178,40 @@ Write-Host "`n[Resona] Download Preference Collection:" -ForegroundColor Cyan
 $doDownloadSovits = $false
 $doDownloadPack = $false
 $doDownloadStt = $false
+$doDownloadFfmpeg = $false
 
-if (!(Test-Path 'GPT-SoVITS\GPT-SoVITS-v2pro-20250604')) {
+if (!(Test-Path 'GPT-SoVITS\GPT-SoVITS-v2pro-20250604\api_v2.py')) {
     $res = Read-Host 'Download SoVITS Inference Engine (~7.7GB Zip / 10.5GB Unpacked)? (Y/N)'
     if ($res -eq 'Y' -or $res -eq 'y') { $doDownloadSovits = $true }
+} else {
+    Write-Host "[Resona] SoVITS detected. Skipping." -ForegroundColor Green
 }
 
-if (!(Test-Path 'packs\Resona_Default')) {
+if (!(Test-Path 'packs\Resona_Default\pack.json')) {
     $res = Read-Host 'Download Default Assets Pack (Resona_Default)? (Y/N)'
     if ($res -eq 'Y' -or $res -eq 'y') { $doDownloadPack = $true }
+} else {
+    Write-Host "[Resona] Default Pack detected. Skipping." -ForegroundColor Green
 }
 
-if (!(Test-Path 'models\stt\sensevoice')) {
-    $res = Read-Host 'Download STT (SenseVoice) Model (3GB Unpacked)? (Y/N)'
-    if ($res -eq 'Y' -or $res -eq 'y') { $doDownloadStt = $true }
+if (!(Test-Path 'models\stt\sensevoice\model.int8.onnx') -and !(Test-Path 'models\stt\sensevoice\zh.onnx')) {
+    # Check for any .onnx file just in case
+    $hasOnnx = Get-ChildItem -Path 'models\stt\sensevoice' -Filter *.onnx -Recurse -ErrorAction SilentlyContinue
+    if (!$hasOnnx) {
+        $res = Read-Host 'Download STT (SenseVoice) Model (3GB Unpacked)? (Y/N)'
+        if ($res -eq 'Y' -or $res -eq 'y') { $doDownloadStt = $true }
+    } else {
+        Write-Host "[Resona] STT Model detected. Skipping." -ForegroundColor Green
+    }
+} else {
+    Write-Host "[Resona] STT Model detected. Skipping." -ForegroundColor Green
+}
+
+if (!(Test-Path 'ffmpeg\bin\ffmpeg.exe')) {
+    $res = Read-Host 'Download FFmpeg (Required for audio processing)? (Y/N)'
+    if ($res -eq 'Y' -or $res -eq 'y') { $doDownloadFfmpeg = $true }
+} else {
+    Write-Host "[Resona] FFmpeg detected. Skipping." -ForegroundColor Green
 }
 
 # --- 5. Sequential Execution of Downloads ---
@@ -265,6 +287,35 @@ if ($doDownloadStt) {
         Remove-Item 'stt_model.tar.bz2'
     } else {
         Write-Error "[Resona] STT Model Download failed."
+    }
+}
+
+# FFmpeg
+if ($doDownloadFfmpeg) {
+    Write-Host "`n[Resona] Starting FFmpeg download..." -ForegroundColor Cyan
+    Write-Host '[Resona] Fetching FFmpeg...'
+    
+    $curlArgs = @("-L", "-f", "-C", "-", $FFMPEG_URL, "-o", "ffmpeg.zip", "--retry", "5", "--connect-timeout", "30")
+    if ($useProxy -eq 'Y' -or $useProxy -eq 'y') {
+        $curlArgs += @("-x", $fullProxy)
+    }
+
+    & curl.exe @curlArgs
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host '[Resona] Extracting FFmpeg...'
+        Expand-Archive -Path 'ffmpeg.zip' -DestinationPath 'ffmpeg_temp' -Force
+        Remove-Item 'ffmpeg.zip'
+        
+        # Move the inner folder to 'ffmpeg'
+        $innerFolder = Get-ChildItem -Path 'ffmpeg_temp' -Directory | Select-Object -First 1
+        if ($innerFolder) {
+            if (Test-Path 'ffmpeg') { Remove-Item 'ffmpeg' -Recurse -Force }
+            Move-Item -Path $innerFolder.FullName -Destination 'ffmpeg'
+            Remove-Item 'ffmpeg_temp' -Recurse -Force
+        }
+    } else {
+        Write-Error "[Resona] FFmpeg Download failed."
     }
 }
 
