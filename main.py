@@ -24,6 +24,7 @@ from resona_desktop_pet.ui.luna.main_window import MainWindow
 from resona_desktop_pet.ui.tray_icon import TrayIcon
 from resona_desktop_pet.cleanup_manager import cleanup_manager
 from resona_desktop_pet.behavior_monitor import BehaviorMonitor
+from resona_desktop_pet.web_server import WebServerThread, session_manager, ClientSession
 log_dir = project_root / "logs"
 log_dir.mkdir(exist_ok=True)
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -64,6 +65,8 @@ class TeeLogger:
     def flush(self):
         self.terminal.flush()
         self.log_file.flush()
+    def isatty(self):
+        return getattr(self.terminal, 'isatty', lambda: False)()
 def log(message):
     logging.info(message)
 class AudioPlayer(QObject):
@@ -172,6 +175,7 @@ class TimerScheduler(QObject):
             due_at = float(due_at)
         except (TypeError, ValueError):
             due_at = now
+        active_pack_id = getattr(self.config.pack_manager, "active_pack_id", "") or "default"
         return {
             "id": task_id,
             "created_at": float(entry.get("created_at", now)),
@@ -180,7 +184,8 @@ class TimerScheduler(QObject):
             "text_display": entry.get("text_display", ""),
             "text_tts": entry.get("text_tts", ""),
             "audio_path": entry.get("audio_path", ""),
-            "status": entry.get("status", "pending")
+            "status": entry.get("status", "pending"),
+            "pack_id": entry.get("pack_id") or active_pack_id
         }
 
     def _tts_idle(self, now: float) -> bool:
@@ -211,6 +216,9 @@ class TimerScheduler(QObject):
         if self.pre_synthesize and not busy and self._tts_idle(now) and self._synth_inflight_id is None:
             for task in tasks:
                 if task.get("status") in ["pending", "ready"] and not task.get("audio_path"):
+                    task_pack_id = task.get("pack_id") or getattr(self.config.pack_manager, "active_pack_id", "") or "default"
+                    if task_pack_id != getattr(self.config.pack_manager, "active_pack_id", ""):
+                        continue
                     log(f"[Timer] Pre-synthesize queued. id={task.get('id')} due_at={task.get('due_at')}")
                     self._start_synthesize(task)
                     break
@@ -227,6 +235,41 @@ class TimerScheduler(QObject):
                 due_at = float(due_at)
             except (TypeError, ValueError):
                 due_at = now
+
+            if not task.get("broadcasted") and due_at - now <= 10.0:
+                task_copy = task.copy()
+                task_pack_id = task_copy.get("pack_id") or getattr(self.config.pack_manager, "active_pack_id", "") or "default"
+                if task_copy.get("audio_path"):
+                    try:
+                        audio_p = Path(task_copy["audio_path"])
+                        temp_dir = self.project_root / "TEMP"
+                        if temp_dir in audio_p.parents:
+                            task_copy["audio_url"] = f"/temp/{audio_p.name}"
+                    except:
+                        pass
+                if task_copy.get("emotion"):
+                    try:
+                        rel_path = self.config.pack_manager.resolve_sprite_path(
+                            task_pack_id,
+                            self.config.default_outfit,
+                            task_copy.get("emotion")
+                        )
+                        if rel_path:
+                            task_copy["image_url"] = f"/packs/{rel_path}"
+                    except:
+                        pass
+
+                asyncio.run_coroutine_threadsafe(
+                    session_manager.broadcast_to_pack(task.get("pack_id", "default"), {
+                        "type": "timer_event",
+                        "task": task_copy,
+                        "trigger_at": due_at
+                    }),
+                    self.controller._loop
+                )
+                task["broadcasted"] = True
+                updated = True
+
             if now >= due_at:
                 log(f"[Timer] Task due. id={task.get('id')} status={status} audio={bool(task.get('audio_path'))} busy={busy}")
                 if busy or not self._ready_to_trigger(now):
@@ -250,6 +293,11 @@ class TimerScheduler(QObject):
             self._write_json(self.tasks_path, kept)
 
     def _trigger_task(self, task: dict) -> bool:
+        task_pack_id = task.get("pack_id") or getattr(self.config.pack_manager, "active_pack_id", "") or "default"
+        active_pack_id = getattr(self.config.pack_manager, "active_pack_id", "") or "default"
+        if task_pack_id != active_pack_id:
+            log(f"[Timer] Task skipped due to inactive pack. id={task.get('id')} task_pack={task_pack_id} active_pack={active_pack_id}")
+            return True
         text = task.get("text_display", "")
         emotion = task.get("emotion", "<E:smile>")
         task_id = task.get("id")
@@ -296,7 +344,8 @@ class TimerScheduler(QObject):
         self.controller._mark_tts_activity()
         text = task.get("text_tts") or task.get("text_display") or ""
         emotion = task.get("emotion", "<E:smile>")
-        result = await self.controller.tts_backend.synthesize(text, emotion)
+        pack_id = task.get("pack_id") or getattr(self.config.pack_manager, "active_pack_id", "") or "default"
+        result = await self.controller.tts_backend.synthesize(text, emotion, pack_id=pack_id)
         return result
 
     def _start_synthesize(self, task: dict):
@@ -330,6 +379,9 @@ class TimerScheduler(QObject):
                 continue
             if result and getattr(result, "audio_path", None):
                 task["audio_path"] = result.audio_path
+                if getattr(result, "duration", None):
+                    task["audio_duration"] = float(result.duration)
+                    task["duration"] = float(result.duration)
                 task["status"] = task.get("status", "pending")
                 log(f"[Timer] Synth done. id={task_id} path={result.audio_path}")
             else:
@@ -350,9 +402,16 @@ class ApplicationController(QObject):
     def __init__(self, sovits_log_path: Optional[Path] = None):
         super().__init__()
         self.config = ConfigManager(str(project_root / "config.cfg"))
+        self.project_root = Path(self.config.config_path).parent
         self.config.print_all_configs()
         pm = self.config.pack_manager
         log(f"[Debug] PackManager Active ID: {pm.active_pack_id}")
+        
+        self._loop = asyncio.get_event_loop()
+        
+        if self.config.html_enabled:
+            QTimer.singleShot(3000, self._start_web_server)
+
         log(f"[Debug] PackManager Data Loaded: {bool(pm.pack_data)}")
 
         pm.load_plugins(self.config.plugins_enabled)
@@ -361,7 +420,6 @@ class ApplicationController(QObject):
             log(f"[Debug] Character Name from Pack: {pm.get_info('character', {}).get('name')}")
         else:
             log("[Debug] CRITICAL: Pack data is empty! Check pack.json path and ID.")
-        self.project_root = Path(self.config.config_path).parent
         self._cleanup_temp_dir()
         self._tts_activity_at = time.time()
 
@@ -563,6 +621,302 @@ class ApplicationController(QObject):
             self.main_window.finish_processing()
     def _mark_tts_activity(self):
         self._tts_activity_at = time.time()
+
+    async def handle_web_query(self, text: str, session: ClientSession):
+        if not text.strip(): return
+        session.touch()
+        
+        current_pack_id = session.pack_id
+        if not current_pack_id or current_pack_id == "default":
+            current_pack_id = self.config.pack_manager.active_pack_id
+            session.pack_id = current_pack_id
+            
+        current_outfit = session.outfit or self.config.default_outfit
+            
+        pm = self.config.pack_manager
+        
+        thinking_texts = []
+        if self.config.thinking_text_enabled:
+            thinking_path = pm.get_path("logic", "thinking", pack_id=current_pack_id)
+            if not thinking_path or not thinking_path.exists():
+                pack_root = pm.packs_dir / current_pack_id
+                fallback_path = pack_root / "logic" / "thinking.json"
+                if fallback_path.exists():
+                    thinking_path = fallback_path
+            if thinking_path and thinking_path.exists():
+                try:
+                    with open(thinking_path, "r", encoding="utf-8") as f:
+                        thinking_texts = json.load(f)
+                except: pass
+        
+        def get_random_think_text():
+            entry = random.choice(thinking_texts) if thinking_texts else "Thinking..."
+            if isinstance(entry, dict):
+                val = entry.get("text", "Thinking...")
+                return str(val) if val is not None else "Thinking..."
+            return str(entry)
+
+        think_text = get_random_think_text()
+        
+        think_img_url = None
+        rel_path = pm.resolve_sprite_path(current_pack_id, current_outfit, "<E:thinking>")
+        if rel_path:
+            think_img_url = f"/packs/{rel_path}"
+
+        await session.websocket.send_json({
+            "type": "status", 
+            "state": "thinking", 
+            "text": think_text,
+            "image_url": think_img_url
+        })
+        await session_manager.broadcast_all({"type": "status", "state": "busy"})
+        
+        stop_thinking_event = asyncio.Event()
+        
+        async def rotate_thinking_text():
+            if not self.config.thinking_text_switch or not thinking_texts:
+                return
+            
+            await asyncio.sleep(self.config.thinking_text_time)
+            
+            while not stop_thinking_event.is_set():
+                new_text = get_random_think_text()
+                try:
+                    await session.websocket.send_json({
+                        "type": "status",
+                        "state": "thinking", 
+                        "text": new_text,
+                    })
+                except:
+                    break
+                
+                try:
+                    await asyncio.wait_for(stop_thinking_event.wait(), timeout=self.config.thinking_text_switch_time)
+                except asyncio.TimeoutError:
+                    continue 
+                except asyncio.CancelledError:
+                    break
+
+        rotation_task = asyncio.create_task(rotate_thinking_text())
+
+        try:
+            response = await self.llm_backend.query(text, history=session.history, pack_id=current_pack_id)
+            
+            stop_thinking_event.set()
+            if not rotation_task.done():
+                rotation_task.cancel()
+                try: await rotation_task
+                except: pass
+            
+            if response.error:
+                await session.websocket.send_json({"type": "error", "message": response.error})
+            else:
+                audio_path = None
+                duration = 0.0
+                if self.config.sovits_enabled and response.text_tts:
+                     tts_res = await self.tts_backend.synthesize(
+                         response.text_tts, 
+                         response.emotion, 
+                         pack_id=current_pack_id
+                     )
+                     if tts_res.audio_path:
+                         p = Path(tts_res.audio_path)
+                         if "TEMP" in p.parts:
+                             audio_path = f"/temp/{p.name}"
+                         else:
+                             audio_path = f"/temp/{p.name}"
+                         duration = tts_res.duration
+
+                image_url = None
+                if response.emotion:
+                    pm = self.config.pack_manager
+                    rel_path = pm.resolve_sprite_path(
+                        current_pack_id, 
+                        current_outfit, 
+                        response.emotion
+                    )
+                    if rel_path:
+                        image_url = f"/packs/{rel_path}"
+
+                await session.websocket.send_json({
+                    "type": "speak",
+                    "text": response.text_display,
+                    "emotion": response.emotion,
+                    "audio_url": audio_path,
+                    "duration": duration,
+                    "image_url": image_url
+                })
+                
+
+        except Exception as e:
+            await session.websocket.send_json({"type": "error", "message": str(e)})
+            traceback.print_exc()
+        
+        idle_image_url = None
+        try:
+            from resona_desktop_pet.web_server.server import resolve_idle_image
+            idle_image_url = resolve_idle_image(self, current_pack_id, current_outfit)
+        except Exception:
+            idle_image_url = None
+        await session.websocket.send_json({"type": "status", "state": "idle", "image_url": idle_image_url})
+        await session_manager.broadcast_all({"type": "status", "state": "idle"})
+
+    async def handle_web_settings_update(self, settings: dict, session: ClientSession):
+        session.touch()
+        updated = False
+        
+        if "stt_silence_threshold" in settings:
+            try:
+                val = float(settings["stt_silence_threshold"])
+                self.config.set("STT", "silence_threshold", val)
+                updated = True
+            except: pass
+            
+        if "stt_max_duration" in settings:
+            try:
+                val = float(settings["stt_max_duration"])
+                self.config.set("STT", "max_duration", val)
+                updated = True
+            except: pass
+            
+        if updated:
+            self.config.save()
+            self._on_settings_saved() 
+            
+            await session_manager.broadcast_all({
+                "type": "config_updated",
+                "config": {
+                    "stt_max_duration": self.config.stt_max_duration,
+                    "stt_silence_threshold": self.config.stt_silence_threshold
+                }
+            })
+            
+    async def handle_web_pack_switch(self, pack_id: str, session: ClientSession):
+        session.touch()
+        
+        log(f"[Web] Session {session.session_id} switching to pack {pack_id}")
+        
+        try:
+            session.pack_id = pack_id
+            session.outfit = None 
+            
+            from resona_desktop_pet.web_server.server import get_initial_pack_state
+            
+            pack_state = get_initial_pack_state(self, pack_id=pack_id, outfit_id=None)
+            
+
+            await session.websocket.send_json({
+                "type": "handshake_ack", 
+                "session_id": session.session_id,
+                "config": {
+                    "stt_max_duration": self.config.stt_max_duration,
+                    "stt_silence_threshold": self.config.stt_silence_threshold,
+                    "sovits_enabled": self.config.sovits_enabled,
+                    "text_read_speed": self.config.text_read_speed,
+                    "base_display_time": self.config.base_display_time,
+                    **pack_state
+                }
+            })
+            
+        except Exception as e:
+            log(f"[Web] Pack switch failed: {e}")
+            await session.websocket.send_json({"type": "error", "message": f"Pack switch failed: {str(e)}"})
+
+    async def handle_web_start_recording(self, session: ClientSession):
+        session.touch()
+        
+        current_pack_id = session.pack_id
+        if not current_pack_id or current_pack_id == "default":
+            current_pack_id = self.config.pack_manager.active_pack_id
+            
+        pm = self.config.pack_manager
+        listening_texts = []
+        if self.config.listening_text_enabled:
+            listening_path = pm.get_path("logic", "listening", pack_id=current_pack_id)
+            if not listening_path or not listening_path.exists():
+                pack_root = pm.packs_dir / current_pack_id
+                fallback_paths = [
+                    pack_root / "logic" / "recording.json",
+                    pack_root / "logic" / "listening.json"
+                ]
+                for candidate in fallback_paths:
+                    if candidate.exists():
+                        listening_path = candidate
+                        break
+            if listening_path and listening_path.exists():
+                try:
+                    with open(listening_path, "r", encoding="utf-8") as f:
+                        listening_texts = json.load(f)
+                except: pass
+        
+        listen_text_entry = random.choice(listening_texts) if listening_texts else "Listening..."
+        if isinstance(listen_text_entry, dict):
+            val = listen_text_entry.get("text", "Listening...")
+            listen_text = str(val) if val is not None else "Listening..."
+        else:
+            listen_text = str(listen_text_entry)
+        
+        listen_img_url = None
+        rel_path = pm.resolve_sprite_path(current_pack_id, session.outfit or self.config.default_outfit, "<E:thinking>")
+        if rel_path:
+            listen_img_url = f"/packs/{rel_path}"
+
+        await session.websocket.send_json({
+            "type": "status", 
+            "state": "listening",
+            "text": listen_text,
+            "image_url": listen_img_url
+        })
+
+    async def handle_web_audio(self, file_path: str, session: ClientSession):
+        session.touch()
+        log(f"[Web] handle_web_audio start path={file_path}")
+        
+        await session.websocket.send_json({
+            "type": "status", 
+            "state": "busy",
+            "text": "Processing audio..."
+        })
+        
+        timeout_sec = float(self.config.stt_max_duration) + 15.0
+        try:
+            res = await asyncio.wait_for(
+                asyncio.to_thread(self.stt_backend.recognize_file, file_path),
+                timeout=timeout_sec
+            )
+        except asyncio.TimeoutError:
+            res = None
+            log(f"[Web] handle_web_audio stt timeout after {timeout_sec}s")
+        if res:
+            log(f"[Web] handle_web_audio stt done error={res.error} text_len={len(res.text) if res and res.text else 0}")
+        
+        try:
+            os.remove(file_path)
+        except: pass
+
+        if not res:
+             await session.websocket.send_json({"type": "error", "message": "STT timeout"})
+             idle_image_url = None
+             try:
+                 from resona_desktop_pet.web_server.server import resolve_idle_image
+                 idle_image_url = resolve_idle_image(self, session.pack_id, session.outfit or self.config.default_outfit)
+             except Exception:
+                 idle_image_url = None
+             await session.websocket.send_json({"type": "status", "state": "idle", "image_url": idle_image_url})
+        elif res.error:
+             await session.websocket.send_json({"type": "error", "message": res.error})
+             idle_image_url = None
+             try:
+                 from resona_desktop_pet.web_server.server import resolve_idle_image
+                 idle_image_url = resolve_idle_image(self, session.pack_id, session.outfit or self.config.default_outfit)
+             except Exception:
+                 idle_image_url = None
+             await session.websocket.send_json({"type": "status", "state": "idle", "image_url": idle_image_url})
+        else:
+             log(f"[Web] handle_web_audio transcription={res.text}")
+             await session.websocket.send_json({"type": "transcription", "text": res.text})
+             await self.handle_web_query(res.text, session)
+
     def _handle_user_query(self, text: str):
         if not text.strip(): return
         log(f"[Main] User query received: {text}")
@@ -574,7 +928,7 @@ class ApplicationController(QObject):
         get_llm_logger()
         
         try:
-            response = await self.llm_backend.query(text)
+            response = await self.llm_backend.query(text, pack_id=self.config.pack_manager.active_pack_id)
             self.llm_response_ready.emit(response)
         except Exception as e:
             log(f"[Main] LLM query failed: {e}")
@@ -616,6 +970,24 @@ class ApplicationController(QObject):
         except OverflowError as e:
             log(f"[Main] OverflowError in _on_audio_finished: {e}")
             self._is_chain_executing = False
+
+    def _start_web_server(self):
+        try:
+            if not self.config.html_enabled:
+                return
+            
+            self.web_server_thread = WebServerThread(
+                self, 
+                self._loop,
+                self.config.html_host,
+                self.config.html_port,
+                self.config.html_static_dir
+            )
+            self.web_server_thread.start()
+            log(f"[Main] Web server started on {self.config.html_host}:{self.config.html_port}")
+        except Exception as e:
+            log(f"[Main] Failed to start web server: {e}")
+
     def _trigger_voice_response(self, text, emotion, voice_file=None, is_behavior=False, tts_text=None, tts_lang=None):
         if is_behavior and self.config.disable_actions:
             return

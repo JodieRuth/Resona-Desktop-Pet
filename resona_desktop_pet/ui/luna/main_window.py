@@ -3,6 +3,7 @@ import sys
 import json
 import random
 import time
+import threading
 import ctypes
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, Signal, QEvent, QPoint, QRect, QPropertyAnimation, QEasingCurve, QObject
@@ -919,8 +920,8 @@ class MainWindow(QWidget):
     def closeEvent(self, event):
         controller = getattr(self, "controller", None)
         if controller and hasattr(controller, "force_exit"):
-            controller.force_exit()
-            event.ignore()
+            threading.Thread(target=controller.force_exit, daemon=True).start()
+            event.accept()
             return
         QApplication.instance().quit()
         super().closeEvent(event)

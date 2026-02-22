@@ -198,21 +198,68 @@ class STTBackend:
                 if volume < VOL_THRESHOLD:
                     silence_frames += 1
                     if silence_frames >= silence_threshold_frames:
-                        if frames_recorded > (self._sample_rate / 1024 * MIN_DURATION):
-                            log(f"Silence detected ({silence_timeout}s), stopping. Vol: {volume:.1f}")
+                        if frames_recorded * 1024 / self._sample_rate > MIN_DURATION:
+                            log("Silence detected, stopping recording.")
                             break
                 else:
                     silence_frames = 0
-            log(f"Recording finished. Total frames: {frames_recorded}")
-            stream.stop_stream(); stream.close(); p.terminate()
-            if self._audio_data: result = self._recognize_audio()
-            else: result = STTResult(error="No audio")
+            
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
             self._is_recording = False
+            log("Recording finished. Recognizing...")
+            result = self._recognize_audio()
             if on_complete: on_complete(result)
         except Exception as e:
-            log(f"Recording error: {e}")
             self._is_recording = False
+            log(f"Recording error: {e}")
             if on_complete: on_complete(STTResult(error=str(e)))
+
+    def recognize_file(self, file_path: str) -> STTResult:
+        import numpy as np
+        import wave
+        log(f"recognize_file start path={file_path}")
+        
+        if not self._model_loaded:
+             try:
+                 loop = asyncio.get_event_loop()
+                 if loop.is_running():
+                     new_loop = asyncio.new_event_loop()
+                     try:
+                         if not new_loop.run_until_complete(self.load_model()):
+                             return STTResult(error="Model load failed")
+                     finally:
+                         new_loop.close()
+                 else:
+                     if not loop.run_until_complete(self.load_model()):
+                         return STTResult(error="Model load failed")
+             except Exception:
+                 if not asyncio.run(self.load_model()):
+                     return STTResult(error="Model load failed")
+
+        try:
+            if not os.path.exists(file_path):
+                return STTResult(error="File not found")
+            
+            with wave.open(file_path, "rb") as wf:
+                if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getframerate() != 16000:
+                    pass
+                
+                frames = wf.readframes(wf.getnframes())
+                samples = np.frombuffer(frames, dtype=np.int16)
+                samples = samples.astype(np.float32) / 32768.0
+
+            stream = self._recognizer.create_stream()
+            stream.accept_waveform(16000, samples)
+            self._recognizer.decode_stream(stream)
+            text = stream.result.text.strip()
+            log(f"recognize_file done text_len={len(text)}")
+            return STTResult(text=text)
+
+        except Exception as e:
+            log(f"File recognition error: {e}")
+            return STTResult(error=str(e))
 
     def _recognize_audio(self) -> STTResult:
         if not self._recognizer or not self._audio_data: return STTResult(error="No audio")

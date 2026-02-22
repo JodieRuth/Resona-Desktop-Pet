@@ -121,12 +121,20 @@ class MCPManager:
                     if tool.name in self._tool_index:
                         logger.warning(f"[MCP] Tool name conflict skipped: {tool.name}")
                         continue
+                    params = tool.inputSchema or {"type": "object", "properties": {}}
+                    if tool.name == "schedule_timer_event":
+                        props = params.get("properties")
+                        if isinstance(props, dict):
+                            props.pop("pack_id", None)
+                        req = params.get("required")
+                        if isinstance(req, list) and "pack_id" in req:
+                            params["required"] = [r for r in req if r != "pack_id"]
                     tool_def = {
                         "type": "function",
                         "function": {
                             "name": tool.name,
                             "description": tool.description or "",
-                            "parameters": tool.inputSchema or {"type": "object", "properties": {}}
+                            "parameters": params
                         }
                     }
                     self._tool_index[tool.name] = {"session": session, "server": spec.name}

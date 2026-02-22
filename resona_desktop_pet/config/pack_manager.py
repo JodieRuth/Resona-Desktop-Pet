@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import importlib.util
+import random
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -11,11 +12,35 @@ class PackManager:
         self.packs_dir = project_root / "packs"
         self.active_pack_id = "Resona_Default"
         self.pack_data: Dict[str, Any] = {}
+        self.pack_cache: Dict[str, Any] = {}
         self.id_map: Dict[str, str] = {}
         self.loaded_plugins: Dict[str, Any] = {}
         self.plugin_trigger_map: Dict[str, str] = {}
         self.plugin_action_map: Dict[str, str] = {}
         self._scan_packs()
+
+    def _get_pack_data(self, pack_id: str) -> Dict[str, Any]:
+        if pack_id in self.pack_cache:
+            return self.pack_cache[pack_id]
+        
+        manifest_path = self.packs_dir / pack_id / "pack.json"
+        if not manifest_path.exists():
+            return {}
+            
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.pack_cache[pack_id] = data
+                return data
+        except UnicodeDecodeError:
+            try:
+                with open(manifest_path, "r", encoding="gbk") as f:
+                    data = json.load(f)
+                    self.pack_cache[pack_id] = data
+                    return data
+            except: pass
+        except: pass
+        return {}
 
     def _scan_packs(self):
         self.id_map = {}
@@ -38,6 +63,7 @@ class PackManager:
         folder_name = self.id_map.get(pack_id, pack_id)
         print(f"[PackManager] set_active_pack requested={pack_id} resolved={folder_name} packs_dir={self.packs_dir}")
         self.active_pack_id = folder_name
+        self.pack_data = self._get_pack_data(folder_name)
         self._load_pack_manifest()
         self._unload_plugins()
 
@@ -144,29 +170,34 @@ class PackManager:
 
         return default
 
-    def get_path(self, category: str, key: str = None) -> Optional[Path]:
-        if not self.pack_data:
+    def get_path(self, category: str, key: str = None, pack_id: Optional[str] = None) -> Optional[Path]:
+        target_pack_id = pack_id if pack_id else self.active_pack_id
+        current_data = self._get_pack_data(target_pack_id) if pack_id else self.pack_data
+        
+        if not current_data and not pack_id:
             self._load_pack_manifest()
-        pack_root = self.packs_dir / self.active_pack_id
+            current_data = self.pack_data
+
+        pack_root = self.packs_dir / target_pack_id
         try:
             rel_path = None
             if category == "logic":
-                configs = self.pack_data.get("logic", {}).get("interaction_configs", {})
+                configs = current_data.get("logic", {}).get("interaction_configs", {})
                 if key == "triggers": rel_path = configs.get("triggers")
                 elif key == "prompts":
-                    prompts = self.pack_data.get("logic", {}).get("prompts", [])
+                    prompts = current_data.get("logic", {}).get("prompts", [])
                     if prompts: rel_path = prompts[0].get("path")
                 elif key == "error_config": rel_path = configs.get("error_config")
                 elif key == "emotions": rel_path = configs.get("emotions")
                 elif key == "thinking": rel_path = configs.get("thinking")
                 elif key == "listening": rel_path = configs.get("listening")
             elif category == "audio":
-                audio_cfg = self.pack_data.get("audio", {})
+                audio_cfg = current_data.get("audio", {})
                 if key == "event_dir": rel_path = audio_cfg.get("event_audio_dir")
                 elif key == "emotion_dir": rel_path = audio_cfg.get("emotion_audio_dir")
                 elif key == "error_dir": rel_path = audio_cfg.get("error_audio_dir")
             elif category == "model":
-                rel_path = self.pack_data.get("character", {}).get("sovits_model", {}).get(key)
+                rel_path = current_data.get("character", {}).get("sovits_model", {}).get(key)
 
             if rel_path:
                 p = Path(rel_path)
@@ -186,6 +217,53 @@ class PackManager:
 
     def get_character_name(self) -> str:
         return self.pack_data.get("character", {}).get("name", "Unknown")
+
+    def resolve_sprite_path(self, pack_id: str, outfit_id: str, emotion: str) -> Optional[str]:
+        try:
+            pack_data = self._get_pack_data(pack_id)
+            if not pack_data: return None
+            
+            outfits = pack_data.get("character", {}).get("outfits", [])
+            target_outfit = next((o for o in outfits if o.get("id") == outfit_id), None)
+            if not target_outfit:
+                target_outfit = next((o for o in outfits if o.get("is_default")), None)
+            
+            if not target_outfit: return None
+            
+            outfit_rel_path = target_outfit.get("path")
+            full_outfit_path = self.packs_dir / pack_id / outfit_rel_path
+            sum_path = full_outfit_path / "sum.json"
+            
+            if not sum_path.exists(): return None
+            
+            with open(sum_path, "r", encoding="utf-8") as f:
+                sum_data = json.load(f)
+            
+            candidates = sum_data.get(emotion, [])
+            if not candidates:
+                for k in ["<E:normal>", "<E:default>"]:
+                    if k in sum_data and sum_data[k]:
+                        candidates = sum_data[k]
+                        break
+                if not candidates and sum_data:
+                    first_key = list(sum_data.keys())[0]
+                    candidates = sum_data[first_key]
+            
+            if candidates:
+                valid_images = []
+                for image_name in candidates:
+                    for ext in [".png", ".jpg", ".jpeg"]:
+                        if (full_outfit_path / (image_name + ext)).exists():
+                            valid_images.append((image_name, ext))
+                            break
+                if valid_images:
+                    image_name, ext = random.choice(valid_images)
+                    rel_path = f"{pack_id}/{outfit_rel_path}/{image_name}{ext}"
+                    return rel_path.replace("\\", "/")
+                        
+        except Exception as e:
+            print(f"[PackManager] Error resolving sprite: {e}")
+        return None
 
     def get_available_packs(self) -> list:
         if not self.packs_dir.exists(): return []

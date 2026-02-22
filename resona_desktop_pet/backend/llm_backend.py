@@ -168,9 +168,9 @@ class LLMBackend:
         arguments = getattr(func, "arguments", None) if func else None
         return call_id, name, arguments
 
-    def _build_messages(self, question: str, extra_context: Optional[str] = None) -> list:
+    def _build_messages(self, question: str, extra_context: Optional[str] = None, history: Optional[ConversationHistory] = None, pack_id: Optional[str] = None) -> list:
         messages = []
-        system_prompt = self.config.get_prompt()
+        system_prompt = self.config.get_prompt(pack_id=pack_id)
         if self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
             system_prompt = f"{system_prompt}\n\n{self._get_mcp_system_instruction()}"
         
@@ -202,7 +202,8 @@ class LLMBackend:
         question_blocks.append(question)
         processed_question = "\n".join(question_blocks)
 
-        raw_history = self.history.get_messages()
+        target_history = history if history is not None else self.history
+        raw_history = target_history.get_messages()
         for msg in raw_history:
             messages.append({"role": msg["role"], "content": msg["content"]})
 
@@ -212,8 +213,8 @@ class LLMBackend:
         messages.append({"role": "user", "content": processed_question})
         return messages
 
-    def _build_messages_with_image(self, question: str, extra_context: Optional[str], image_base64: str) -> list:
-        messages = self._build_messages(question, extra_context)
+    def _build_messages_with_image(self, question: str, extra_context: Optional[str], image_base64: str, history: Optional[ConversationHistory] = None, pack_id: Optional[str] = None) -> list:
+        messages = self._build_messages(question, extra_context, history, pack_id=pack_id)
         image_url = f"data:image/png;base64,{image_base64}"
         last_message = messages[-1]
         last_message["content"] = [
@@ -567,7 +568,8 @@ class LLMBackend:
         max_tool_rounds: int,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        max_tokens: int = 500
+        max_tokens: int = 500,
+        pack_id: Optional[str] = None
     ) -> LLMResponse:
         attempted_retry = False
         if max_tool_rounds <= 0:
@@ -614,6 +616,9 @@ class LLMBackend:
                     elif isinstance(arguments, dict):
                         parsed_args = arguments
                     
+                    if pack_id:
+                        parsed_args["pack_id"] = pack_id
+
                     try:
                         tool_result = await self._mcp_manager.call_tool(name, parsed_args)
                     except Exception as e:
@@ -649,7 +654,7 @@ class LLMBackend:
 
         return LLMResponse(error=f"Tool call exceeded max rounds ({max_tool_rounds})")
 
-    async def query(self, question: str) -> LLMResponse:
+    async def query(self, question: str, history: Optional[ConversationHistory] = None, extra_context: Optional[str] = None, pack_id: Optional[str] = None) -> LLMResponse:
         llm_config = self.config.get_llm_config()
         model_type = llm_config["model_type"]
         model_name = llm_config["model_name"]
@@ -678,9 +683,9 @@ class LLMBackend:
             openai_compatible = model_type == "local" or model_type in [1, 2, 4, 6, 7, 8, 9]
             image_capable = openai_compatible or model_type in [3, 5]
             if image_base64 and image_capable:
-                messages = self._build_messages_with_image(question, ocr_context, image_base64)
+                messages = self._build_messages_with_image(question, extra_context or ocr_context, image_base64, history, pack_id=pack_id)
             else:
-                messages = self._build_messages(question, ocr_context)
+                messages = self._build_messages(question, extra_context or ocr_context, history, pack_id=pack_id)
             processed_question = self._extract_text_content(messages[-1]["content"])
             tools: List[Dict[str, Any]] = []
             max_tool_rounds = 0
@@ -701,7 +706,9 @@ class LLMBackend:
                     prompt_parts.append("extra_context")
             if image_base64 and image_capable:
                 prompt_parts.append("image")
-            if self.history.get_messages():
+            
+            target_history = history if history is not None else self.history
+            if target_history.get_messages():
                 prompt_parts.append("history")
             parts_text = ", ".join(prompt_parts) if prompt_parts else "base"
             print(f"[LLM] Prompt built. Parts: {parts_text}")
@@ -719,7 +726,8 @@ class LLMBackend:
                         max_tool_rounds=max_tool_rounds,
                         temperature=llm_config.get("temperature", 0.7),
                         top_p=llm_config.get("top_p", 1.0),
-                        max_tokens=llm_config.get("max_tokens", 500)
+                        max_tokens=llm_config.get("max_tokens", 500),
+                        pack_id=pack_id
                     )
                 else:
                     response = await self._query_litellm(
@@ -738,8 +746,9 @@ class LLMBackend:
             response = LLMResponse(error=f"Request Failed: {e}")
 
         if not response.error and response.text_display:
-            self.history.add("user", processed_question)
-            self.history.add("assistant", response.raw_response)
+            target_history = history if history is not None else self.history
+            target_history.add("user", processed_question)
+            target_history.add("assistant", response.raw_response)
 
         return response
 

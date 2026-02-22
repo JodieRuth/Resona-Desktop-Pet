@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Resona Web Client</title>
+    <link rel="stylesheet" href="static/css/style.css?v=20260222_1">
+</head>
+<body>
+    <div id="app">
+        <!-- Background Layer -->
+        <div id="background-layer"></div>
+
+        <!-- Character Layer -->
+        <div id="character-layer">
+            <img id="character-img" src="" alt="Character">
+        </div>
+
+        <!-- UI Layer -->
+        <div id="ui-layer">
+            <!-- Top Bar -->
+            <div id="top-bar">
+                <div id="status-indicator" class="status-dot"></div>
+                <button id="settings-btn" class="icon-btn">⚙️</button>
+            </div>
+
+            <!-- Dialogue/Input Box -->
+            <div id="dialogue-box">
+                <div class="dialogue-header">
+                    <div id="character-name"></div>
+                </div>
+                <div class="dialogue-input-area">
+                    <textarea id="text-input" placeholder="Type and press Enter..."></textarea>
+                    <div class="action-buttons">
+                        <button id="mic-btn" class="icon-btn">🎤</button>
+                        <button id="send-btn" class="icon-btn">➤</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Settings</h2>
+                    <button id="close-settings-btn" class="close-btn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="setting-item">
+                        <label>Active Pack:</label>
+                        <span id="setting-pack-id">Loading...</span>
+                    </div>
+                    <div class="setting-item">
+                        <label>Character:</label>
+                        <span id="setting-char-name">Loading...</span>
+                    </div>
+                    <div class="setting-item">
+                        <label>Outfit:</label>
+                        <span id="setting-outfit">Loading...</span>
+                    </div>
+                    <hr>
+                    <div class="setting-item">
+                        <label>Description:</label>
+                        <span id="setting-desc" class="long-text">Loading...</span>
+                    </div>
+                    <div class="setting-item">
+                        <label>Author:</label>
+                        <span id="setting-author">Loading...</span>
+                    </div>
+                    <div class="setting-item">
+                        <label>Version:</label>
+                        <span id="setting-version">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio Player -->
+    <audio id="audio-player" style="display:none;"></audio>
+
+    <script>
+        window.__RES_WEB_VERSION = "20260222_2";
+        window.__clientLog = function (level, message, extra) {
+            try {
+                const payload = {
+                    level: level || "info",
+                    message: String(message || ""),
+                    extra: extra || null,
+                    href: location.href,
+                    userAgent: navigator.userAgent,
+                    ts: Date.now()
+                };
+                if (navigator.sendBeacon) {
+                    navigator.sendBeacon("/__client_log", JSON.stringify(payload));
+                } else {
+                    fetch("/__client_log", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    }).catch(() => {});
+                }
+            } catch (e) {}
+        };
+        window.addEventListener("error", (e) => {
+            window.__clientLog("error", e.message, { filename: e.filename, lineno: e.lineno, colno: e.colno });
+        });
+        window.addEventListener("unhandledrejection", (e) => {
+            window.__clientLog("error", "unhandledrejection", { reason: String(e.reason || "") });
+        });
+        window.__clientLog("info", "index loaded", { version: window.__RES_WEB_VERSION });
+    </script>
+    <script src="static/js/main.js?v=20260222_2"></script>
+</body>
+</html>

@@ -623,6 +623,34 @@ class ConfigManager:
 
 
     @property
+    def html_enabled(self) -> bool:
+        return self.getboolean("HTML", "enabled", False)
+
+    @property
+    def html_host(self) -> str:
+        return self.get("HTML", "host", "0.0.0.0")
+
+    @property
+    def html_port(self) -> int:
+        return self.getint("HTML", "port", 8000)
+
+    @property
+    def html_static_dir(self) -> str:
+        return self.get("HTML", "static_dir", "html")
+
+    @property
+    def html_upload_dir(self) -> str:
+        return self.get("HTML", "upload_dir", "TEMP/uploads")
+
+    @property
+    def html_max_connections(self) -> int:
+        return self.getint("HTML", "max_connections", 10)
+
+    @property
+    def html_session_timeout(self) -> int:
+        return self.getint("HTML", "session_timeout", 3600)
+
+    @property
     def monitor_clipboard(self) -> bool:
         return self.get_bool("General", "monitor_clipboard", True)
 
@@ -666,19 +694,25 @@ class ConfigManager:
     def enable_ip_context(self) -> bool:
         return self.getboolean("Prompt", "enable_ip_context", True)
 
-    def get_prompt(self) -> str:
+    def get_prompt(self, pack_id: Optional[str] = None) -> str:
         
         target_val = self.prompt_file_path 
         
         if self.use_pack_settings:
-            logic_info = self.pack_manager.get_info("logic", {})
+            target_pack_id = pack_id if pack_id else self.pack_manager.active_pack_id
+            
+            
+            pack_data = self.pack_manager._get_pack_data(target_pack_id)
+            if not pack_data:
+                 raise RuntimeError(f"CRITICAL: Pack data for '{target_pack_id}' not found.")
+                 
+            logic_info = pack_data.get("logic", {})
             prompts = logic_info.get("prompts", [])
             
             if not prompts:
-                pack_id = self.pack_manager.active_pack_id
-                print(f"[Config] Error: No 'prompts' found in 'logic' section of pack.json for pack '{pack_id}'")
+                print(f"[Config] Error: No 'prompts' found in 'logic' section of pack.json for pack '{target_pack_id}'")
                 print(f"[Config] logic_info content: {logic_info}")
-                raise RuntimeError(f"CRITICAL: Active pack '{pack_id}' has no prompts defined in its pack.json.")
+                raise RuntimeError(f"CRITICAL: Pack '{target_pack_id}' has no prompts defined in its pack.json.")
             
             target_prompt = next((p for p in prompts if p.get("id") == target_val), None)
             
@@ -689,20 +723,21 @@ class ConfigManager:
                 target_prompt = prompts[0]
             
             rel_path = target_prompt.get("path")
-            pack_root = self.pack_manager.packs_dir / self.pack_manager.active_pack_id
+            pack_root = self.pack_manager.packs_dir / target_pack_id
             full_path = pack_root / rel_path
             
             if full_path.exists():
                 return full_path.read_text(encoding="utf-8")
             
-            default_prompt_path = self.pack_manager.get_path("logic", "prompts")
-            if default_prompt_path:
-                prompt_dir = default_prompt_path.parent
-                legacy_path = prompt_dir / target_val
-                if legacy_path.exists():
-                     return legacy_path.read_text(encoding="utf-8")
+            if not pack_id or pack_id == self.pack_manager.active_pack_id:
+                default_prompt_path = self.pack_manager.get_path("logic", "prompts")
+                if default_prompt_path:
+                    prompt_dir = default_prompt_path.parent
+                    legacy_path = prompt_dir / target_val
+                    if legacy_path.exists():
+                         return legacy_path.read_text(encoding="utf-8")
 
-            raise RuntimeError(f"CRITICAL: Prompt file for ID '{target_val}' or path '{rel_path}' not found.")
+            raise RuntimeError(f"CRITICAL: Prompt file for ID '{target_val}' or path '{rel_path}' not found in pack '{target_pack_id}'.")
 
         if self.prompt_source == "string":
             return self.prompt_content

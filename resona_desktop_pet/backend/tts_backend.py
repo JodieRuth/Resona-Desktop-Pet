@@ -20,40 +20,51 @@ class TTSBackend:
     def __init__(self, config: ConfigManager, sovits_log_path: Optional[Path] = None):
         self.config = config
         self.project_root = Path(config.config_path).parent
+        self.emotions_cache = {}
         self.emotions_config = self._load_emotions_config()
         self.sovits_log_path = sovits_log_path
         self._temp_dir = self.project_root / "TEMP"
         self._temp_dir.mkdir(exist_ok=True)
         self.api_url = f"http://127.0.0.1:{config.sovits_api_port}"
         self.timeout = aiohttp.ClientTimeout(total=config.sovits_timeout)
-    def _load_emotions_config(self) -> dict:
-        json_path = self.config.pack_manager.get_path("logic", "emotions")
-        active_pack = getattr(self.config.pack_manager, "active_pack_id", "")
-        print(f"[TTS] Loading emotions config: pack={active_pack} path={json_path}")
+    def _load_emotions_config(self, pack_id: Optional[str] = None) -> dict:
+        target_pack = pack_id if pack_id else getattr(self.config.pack_manager, "active_pack_id", "")
+        json_path = self.config.pack_manager.get_path("logic", "emotions", pack_id=target_pack)
+        print(f"[TTS] Loading emotions config: pack={target_pack} path={json_path}")
         if json_path and json_path.exists():
             try:
                 with open(json_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    log(f"[TTS] Loaded {len(data)} emotions from pack.")
+                    log(f"[TTS] Loaded {len(data)} emotions from pack {target_pack}.")
+                    self.emotions_cache[target_pack] = data
                     return data
             except Exception as e:
                 log(f"[TTS] CRITICAL: Error loading pack emotions.json: {e}")
         else:
             log(f"[TTS] Emotions config missing: {json_path}")
+        self.emotions_cache[target_pack] = {}
         return {}
 
     def reload_config(self):
+        self.emotions_cache.clear()
         self.emotions_config = self._load_emotions_config()
         active_pack = getattr(self.config.pack_manager, "active_pack_id", "")
         log(f"[TTS] Emotions config reloaded. pack={active_pack} count={len(self.emotions_config)}")
-    def _get_emotion_config(self, emotion: str) -> dict:
+
+    def _get_emotion_config(self, emotion: str, pack_id: Optional[str] = None) -> dict:
+        target_pack = pack_id if pack_id else getattr(self.config.pack_manager, "active_pack_id", "")
+        if target_pack not in self.emotions_cache:
+            self._load_emotions_config(target_pack)
+        
+        config = self.emotions_cache.get(target_pack, {})
         target = emotion.split("|")[0] if "|" in emotion else emotion
-        if target not in self.emotions_config:
-            log(f"[TTS] Warning: Emotion {target} not defined. Falling back.")
+        if target not in config:
+            log(f"[TTS] Warning: Emotion {target} not defined in {target_pack}. Falling back.")
             target = "<E:smile>"
-        return self.emotions_config.get(target, {})
-    def _resolve_ref_audio_path(self, ref_wav: str) -> Path:
-        pack_emotion_dir = self.config.pack_manager.get_path("audio", "emotion_dir")
+        return config.get(target, {})
+
+    def _resolve_ref_audio_path(self, ref_wav: str, pack_id: Optional[str] = None) -> Path:
+        pack_emotion_dir = self.config.pack_manager.get_path("audio", "emotion_dir", pack_id=pack_id)
         if pack_emotion_dir:
             path = pack_emotion_dir / ref_wav
             if path.exists():
@@ -91,20 +102,20 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                 async with session.get(self.api_url) as response:
                     return response.status in [200, 404, 405]
         except: return False
-    async def synthesize(self, text: str, emotion: str = "<E:smile>", language: Optional[str] = None) -> TTSResult:
+    async def synthesize(self, text: str, emotion: str = "<E:smile>", language: Optional[str] = None, pack_id: Optional[str] = None) -> TTSResult:
         if not self.config.sovits_enabled: return TTSResult(error="TTS is disabled")
-        log(f"[TTS] Synthesizing: {text[:30]}... ({emotion})")
+        log(f"[TTS] Synthesizing: {text[:30]}... ({emotion}) pack={pack_id}")
         if not await self.load_model():
             log("[TTS] SoVITS API not available")
             return TTSResult(error="SoVITS API offline")
         try:
-            emotion_config = self._get_emotion_config(emotion)
+            emotion_config = self._get_emotion_config(emotion, pack_id=pack_id)
             if not emotion_config: return TTSResult(error="Emotion config missing")
-            ref_wav_path = self._resolve_ref_audio_path(emotion_config["ref_wav"])
+            ref_wav_path = self._resolve_ref_audio_path(emotion_config["ref_wav"], pack_id=pack_id)
             ref_lang = language if language else self.config.tts_language
             prompt_lang = emotion_config.get("ref_lang", "ja")
             
-            pack_model_dir = self.config.pack_manager.get_path("models", "sovits")
+            pack_model_dir = self.config.pack_manager.get_path("models", "sovits", pack_id=pack_id)
             gpt_path = None
             sovits_path = None
             if pack_model_dir and pack_model_dir.exists():
