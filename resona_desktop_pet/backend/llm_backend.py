@@ -168,10 +168,10 @@ class LLMBackend:
         arguments = getattr(func, "arguments", None) if func else None
         return call_id, name, arguments
 
-    def _build_messages(self, question: str, extra_context: Optional[str] = None, history: Optional[ConversationHistory] = None, pack_id: Optional[str] = None) -> list:
+    def _build_messages(self, question: str, extra_context: Optional[str] = None, history: Optional[ConversationHistory] = None, pack_id: Optional[str] = None, source: str = "desktop") -> list:
         messages = []
         system_prompt = self.config.get_prompt(pack_id=pack_id)
-        if self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
+        if source == "desktop" and self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
             system_prompt = f"{system_prompt}\n\n{self._get_mcp_system_instruction()}"
         
         if self.config.tts_language == "ja":
@@ -196,6 +196,10 @@ class LLMBackend:
             question_blocks.append(f"[Local Time: {time_info}]")
         if self.config.enable_ip_context and self._ip_context:
             question_blocks.append(f"[User IP: {self._ip_context}]")
+        
+        if source and source != "desktop":
+            question_blocks.append(f"[Request Source: {source}]")
+
         sentence_limit = self.config.ocr_sentence_limit
         if sentence_limit > 0:
             question_blocks.append(f"Note: Keep your response under {sentence_limit} sentences and maintain your persona.")
@@ -213,8 +217,8 @@ class LLMBackend:
         messages.append({"role": "user", "content": processed_question})
         return messages
 
-    def _build_messages_with_image(self, question: str, extra_context: Optional[str], image_base64: str, history: Optional[ConversationHistory] = None, pack_id: Optional[str] = None) -> list:
-        messages = self._build_messages(question, extra_context, history, pack_id=pack_id)
+    def _build_messages_with_image(self, question: str, extra_context: Optional[str], image_base64: str, history: Optional[ConversationHistory] = None, pack_id: Optional[str] = None, source: str = "desktop") -> list:
+        messages = self._build_messages(question, extra_context, history, pack_id=pack_id, source=source)
         image_url = f"data:image/png;base64,{image_base64}"
         last_message = messages[-1]
         last_message["content"] = [
@@ -654,7 +658,7 @@ class LLMBackend:
 
         return LLMResponse(error=f"Tool call exceeded max rounds ({max_tool_rounds})")
 
-    async def query(self, question: str, history: Optional[ConversationHistory] = None, extra_context: Optional[str] = None, pack_id: Optional[str] = None) -> LLMResponse:
+    async def query(self, question: str, history: Optional[ConversationHistory] = None, extra_context: Optional[str] = None, pack_id: Optional[str] = None, source: str = "desktop") -> LLMResponse:
         llm_config = self.config.get_llm_config()
         model_type = llm_config["model_type"]
         model_name = llm_config["model_name"]
@@ -667,29 +671,33 @@ class LLMBackend:
 
         try:
             ocr_config = self.config.get_ocr_config()
-            ocr_context = await self._get_ocr_context(ocr_config)
-            vlm_enabled = ocr_config.get("vlm_enabled", False)
+            ocr_context = None
             image_base64 = None
-            if vlm_enabled:
-                try:
-                    image_base64 = await asyncio.wait_for(
-                        asyncio.to_thread(self._prepare_image_base64),
-                        timeout=10
-                    )
-                except asyncio.TimeoutError:
-                    image_base64 = None
-                except Exception:
-                    image_base64 = None
+            
+            if source == "desktop":
+                ocr_context = await self._get_ocr_context(ocr_config)
+                vlm_enabled = ocr_config.get("vlm_enabled", False)
+                if vlm_enabled:
+                    try:
+                        image_base64 = await asyncio.wait_for(
+                            asyncio.to_thread(self._prepare_image_base64),
+                            timeout=10
+                        )
+                    except asyncio.TimeoutError:
+                        image_base64 = None
+                    except Exception:
+                        image_base64 = None
+
             openai_compatible = model_type == "local" or model_type in [1, 2, 4, 6, 7, 8, 9]
             image_capable = openai_compatible or model_type in [3, 5]
             if image_base64 and image_capable:
-                messages = self._build_messages_with_image(question, extra_context or ocr_context, image_base64, history, pack_id=pack_id)
+                messages = self._build_messages_with_image(question, extra_context or ocr_context, image_base64, history, pack_id=pack_id, source=source)
             else:
-                messages = self._build_messages(question, extra_context or ocr_context, history, pack_id=pack_id)
+                messages = self._build_messages(question, extra_context or ocr_context, history, pack_id=pack_id, source=source)
             processed_question = self._extract_text_content(messages[-1]["content"])
             tools: List[Dict[str, Any]] = []
             max_tool_rounds = 0
-            if self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
+            if source == "desktop" and self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
                 tools = self._mcp_manager.get_tools()
                 max_tool_rounds = max(self._mcp_manager.max_tool_rounds, 0)
             prompt_parts = []

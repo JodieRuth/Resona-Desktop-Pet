@@ -98,6 +98,7 @@ function connect() {
         statusIndicator.className = 'status-dot connected';
         socket.send(JSON.stringify({
             type: 'handshake',
+            client_type: 'web_html',
             session_id: sessionId,
             pack_id: packId
         }));

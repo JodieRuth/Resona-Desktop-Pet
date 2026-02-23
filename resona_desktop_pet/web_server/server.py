@@ -8,6 +8,7 @@ import threading
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Optional
 from .session_manager import SessionManager
@@ -26,6 +27,7 @@ app.add_middleware(
 session_manager = SessionManager()
 controller_ref = None
 main_loop = None
+BEACON_PORT = 50123
 
 def resolve_static_path(controller, static_dir: str) -> Path:
     project_root = Path(controller.project_root)
@@ -165,6 +167,21 @@ def set_controller(controller, loop):
     controller_ref = controller
     main_loop = loop
 
+def start_udp_beacon(http_port: int):
+    def run():
+        payload = json.dumps({"type": "resona_server", "port": http_port}).encode("utf-8")
+        while True:
+            try:
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                s.sendto(payload, ("255.255.255.255", BEACON_PORT))
+                s.close()
+            except Exception:
+                pass
+            time.sleep(2.0)
+    threading.Thread(target=run, daemon=True).start()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -174,6 +191,7 @@ async def websocket_endpoint(websocket: WebSocket):
         init_data = await websocket.receive_json()
         pack_id = init_data.get("pack_id", "default")
         sess_id = init_data.get("session_id")
+        client_type = init_data.get("client_type", "web_app")
 
         if (pack_id == "default" or not pack_id) and controller_ref:
             pack_id = controller_ref.config.pack_manager.active_pack_id
@@ -187,6 +205,7 @@ async def websocket_endpoint(websocket: WebSocket):
         
         session.websocket = websocket
         session.pack_id = pack_id
+        session.client_type = client_type
         session.touch()
         
         pack_state = get_initial_pack_state(controller_ref, pack_id=session.pack_id, outfit_id=session.outfit)
@@ -416,7 +435,18 @@ class WebServerThread(threading.Thread):
         
         static_path = resolve_static_path(self.controller, self.static_dir)
         print(f"[Web] Static path: {static_path}")
+        start_udp_beacon(self.port)
         
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            print(f"\n[Web] Server is running! Access it from your phone at: http://{local_ip}:{self.port}\n")
+        except Exception:
+            print(f"\n[Web] Server is running at: http://localhost:{self.port}\n")
+
         packs_path = Path(self.controller.project_root) / "packs"
         app.mount("/packs", StaticFiles(directory=str(packs_path)), name="packs")
         

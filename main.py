@@ -700,7 +700,8 @@ class ApplicationController(QObject):
         rotation_task = asyncio.create_task(rotate_thinking_text())
 
         try:
-            response = await self.llm_backend.query(text, history=session.history, pack_id=current_pack_id)
+            source = session.client_type if hasattr(session, "client_type") and session.client_type else "web_client"
+            response = await self.llm_backend.query(text, history=session.history, pack_id=current_pack_id, source=source)
             
             stop_thinking_event.set()
             if not rotation_task.done():
@@ -928,7 +929,7 @@ class ApplicationController(QObject):
         get_llm_logger()
         
         try:
-            response = await self.llm_backend.query(text, pack_id=self.config.pack_manager.active_pack_id)
+            response = await self.llm_backend.query(text, pack_id=self.config.pack_manager.active_pack_id, source="desktop")
             self.llm_response_ready.emit(response)
         except Exception as e:
             log(f"[Main] LLM query failed: {e}")

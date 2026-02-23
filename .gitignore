@@ -148,3 +148,16 @@ build/
 .env
 .env.local
 *.local.cfg
+
+# =========================
+# Android Client
+# =========================
+android-client/.gradle/
+android-client/.idea/
+android-client/.cxx/
+android-client/.kotlin/
+android-client/local.properties
+android-client/**/build/
+android-client/**/*.apk
+android-client/**/*.aab
+android-client/**/*.iml

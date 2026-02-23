@@ -9,6 +9,7 @@ class ClientSession:
     def __init__(self, session_id: str, pack_id: str, history_max_rounds: int):
         self.session_id = session_id
         self.pack_id = pack_id
+        self.client_type = "unknown"
         self.outfit = None  
         self.history = ConversationHistory(max_rounds=history_max_rounds)
         self.last_active = time.time()

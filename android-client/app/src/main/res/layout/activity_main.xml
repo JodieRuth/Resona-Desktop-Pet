@@ -1,0 +1,181 @@
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_gradient">
+
+    <FrameLayout
+        android:id="@+id/characterLayer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <com.resona.client.TransparentCropImageView
+            android:id="@+id/characterImage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="true"
+            android:paddingBottom="140dp" />
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/uiLayer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <LinearLayout
+            android:id="@+id/topBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="end|center_vertical"
+            android:padding="16dp">
+
+            <View
+                android:id="@+id/statusDot"
+                android:layout_width="10dp"
+                android:layout_height="10dp"
+                android:background="@drawable/status_dot_idle"
+                android:layout_marginEnd="12dp" />
+
+            <TextView
+                android:id="@+id/statusText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="未连接"
+                android:textSize="14sp"
+                android:textColor="#FFFFFF"
+                android:gravity="center_vertical"
+                android:layout_marginEnd="8dp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/settingsBtn"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:text="⚙️"
+            android:textSize="18sp"
+            android:background="@drawable/glass_circle"
+            android:textColor="#222222"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="72dp"
+            android:layout_marginEnd="16dp" />
+
+        <LinearLayout
+            android:id="@+id/dialogueBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="12dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:background="@drawable/dialogue_box_bg"
+            android:orientation="vertical"
+            android:padding="18dp"
+            android:minHeight="200dp">
+
+            <TextView
+                android:id="@+id/characterName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Resona"
+                android:textColor="#E0E0E0"
+                android:textStyle="bold"
+                android:textSize="16sp"
+                android:gravity="center_horizontal"
+                android:layout_marginBottom="6dp" />
+
+            <LinearLayout
+                android:id="@+id/dialogueInputArea"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/dialogue_input_bg"
+                android:padding="8dp"
+                android:layout_marginBottom="6dp"
+                android:gravity="end"
+                android:minHeight="140dp">
+
+                <EditText
+                    android:id="@+id/textInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Type and press Enter..."
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#66FFFFFF"
+                    android:background="@android:color/transparent"
+                    android:inputType="text"
+                    android:textSize="13sp"
+                    android:minLines="4"
+                    android:maxLines="4"
+                    android:imeOptions="actionSend"
+                    android:minHeight="96dp" />
+
+                <TextView
+                    android:id="@+id/dialogueText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="等待事件"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp"
+                    android:minLines="4"
+                    android:maxLines="4"
+                    android:minHeight="96dp"
+                    android:visibility="gone" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="8dp"
+                    android:layout_gravity="end">
+
+                    <Button
+                        android:id="@+id/micBtn"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:text="🎤"
+                        android:textColor="#CCCCCC"
+                        android:background="@drawable/icon_btn_bg"
+                        android:layout_marginStart="8dp" />
+
+                    <Button
+                        android:id="@+id/sendBtn"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:text="➤"
+                        android:textColor="#FFFFFF"
+                        android:background="@drawable/send_btn_bg"
+                        android:layout_marginStart="8dp" />
+                </LinearLayout>
+            </LinearLayout>
+
+        </LinearLayout>
+    </FrameLayout>
+
+    <FrameLayout
+        android:id="@+id/connectLogOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true">
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/connectLogText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:text="连接日志"
+                android:lineSpacingExtra="4dp" />
+        </ScrollView>
+    </FrameLayout>
+</FrameLayout>
