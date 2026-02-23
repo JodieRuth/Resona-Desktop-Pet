@@ -39,6 +39,7 @@ import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class MainActivity : AppCompatActivity() {
     private lateinit var imageView: TransparentCropImageView
@@ -50,6 +51,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var micBtn: Button
     private lateinit var sendBtn: Button
     private lateinit var settingsBtn: Button
+    private lateinit var connectBtn: Button
     private lateinit var dialogueBox: View
     private lateinit var connectLogOverlay: View
     private lateinit var connectLogText: TextView
@@ -66,6 +68,8 @@ class MainActivity : AppCompatActivity() {
     private var isRecording = false
     private var currentState = "idle"
     private var lastIdleImageUrl: String? = null
+    private var lastOutfitChangeAt: Long = 0L
+    private val imageLoadToken = AtomicInteger(0)
     private var recorder: AudioRecorder? = null
     private val connectLogBuffer = StringBuilder()
     private var connectLogVisible = false
@@ -151,19 +155,25 @@ class MainActivity : AppCompatActivity() {
                     val imageUrl = intent.getStringExtra(ResonaService.EXTRA_IMAGE_URL)
                     if (!imageUrl.isNullOrBlank()) {
                         loadImage(imageUrl)
+                        lastIdleImageUrl = imageUrl
+                        lastOutfitChangeAt = System.currentTimeMillis()
                     }
                 }
                 ResonaService.ACTION_CONFIG -> {
                     val json = intent.getStringExtra(ResonaService.EXTRA_CONFIG_JSON)
                         ?: ResonaService.getCachedConfigJson()
                     if (json.isBlank()) return
+                    val previousPackId = currentConfig?.activePack
                     currentConfig = parseConfig(json)
                     val cfg = currentConfig
                     if (cfg != null) {
                         characterNameView.text = cfg.characterName
                         statusView.text = "已连接"
                         appendConnectLog("配置：角色=${cfg.characterName}")
-                        if (!cfg.initialImageUrl.isNullOrBlank()) {
+                        if (!previousPackId.isNullOrBlank() && cfg.activePack != previousPackId) {
+                            lastIdleImageUrl = null
+                        }
+                        if (lastIdleImageUrl.isNullOrBlank() && !cfg.initialImageUrl.isNullOrBlank()) {
                             loadImage(cfg.initialImageUrl)
                         }
                         requestOutfits()
@@ -205,6 +215,7 @@ class MainActivity : AppCompatActivity() {
             micBtn = findViewById(R.id.micBtn)
             sendBtn = findViewById(R.id.sendBtn)
             settingsBtn = findViewById(R.id.settingsBtn)
+            connectBtn = findViewById(R.id.connectBtn)
             dialogueBox = findViewById(R.id.dialogueBox)
             connectLogOverlay = findViewById(R.id.connectLogOverlay)
             connectLogText = findViewById(R.id.connectLogText)
@@ -217,7 +228,7 @@ class MainActivity : AppCompatActivity() {
                 val dialog = findViewById<TextView>(R.id.dialogueText)
                 status.text = "启动失败"
                 dialog.text = ""
-                textInput.setText("Error: $summary")
+                showErrorPopup("Error: $summary")
                 updateStatusDot("disconnected")
             } catch (_: Throwable) {
             }
@@ -262,6 +273,10 @@ class MainActivity : AppCompatActivity() {
 
         settingsBtn.setOnClickListener {
             showSettingsDialog()
+        }
+
+        connectBtn.setOnClickListener {
+            showManualConnectDialog("手动连接")
         }
 
         try {
@@ -513,8 +528,11 @@ class MainActivity : AppCompatActivity() {
             else -> {
                 updateStatusDot("connected")
                 if (!imageUrl.isNullOrBlank()) {
-                    lastIdleImageUrl = imageUrl
-                    if (!isSpeaking) loadImage(imageUrl)
+                    val now = System.currentTimeMillis()
+                    if (lastOutfitChangeAt == 0L || now - lastOutfitChangeAt >= 1500L) {
+                        lastIdleImageUrl = imageUrl
+                        if (!isSpeaking) loadImage(imageUrl)
+                    }
                 }
                 if (!isSpeaking && pendingResponse) {
                     finishPendingResponse()
@@ -625,6 +643,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadImage(url: String) {
+        val token = imageLoadToken.incrementAndGet()
         Thread {
             try {
                 val normalized = normalizeImageUrl(url)
@@ -649,6 +668,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions) ?: return@use
                     runOnUiThread {
+                        if (token != imageLoadToken.get()) return@runOnUiThread
                         try {
                             imageView.setBitmapWithCrop(bmp)
                         } catch (t: Throwable) {
@@ -1079,11 +1099,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun reportClientError(message: String) {
         appendConnectLog("错误：$message")
-        showInputBox(false)
-        textInput.setText("Error: $message")
+        showErrorPopup(message)
         statusView.text = "连接失败"
         updateStatusDot("disconnected")
         cancelPendingResponse()
         unlockInput()
+    }
+
+    private fun showErrorPopup(message: String) {
+        runOnUiThread {
+            try {
+                val dialog = AlertDialog.Builder(this)
+                    .setMessage(message)
+                    .setCancelable(true)
+                    .create()
+                dialog.setCanceledOnTouchOutside(true)
+                dialog.show()
+            } catch (_: Throwable) {
+            }
+        }
     }
 }

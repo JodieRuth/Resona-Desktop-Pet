@@ -9,8 +9,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
-downloads/
-eggs/
+downloads/eggs/
 .eggs/
 lib/
 lib64/
@@ -161,3 +160,4 @@ android-client/**/build/
 android-client/**/*.apk
 android-client/**/*.aab
 android-client/**/*.iml
+android-client/*.keystore

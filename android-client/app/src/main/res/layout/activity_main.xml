@@ -62,6 +62,18 @@
             android:layout_marginTop="72dp"
             android:layout_marginEnd="16dp" />
 
+        <Button
+            android:id="@+id/connectBtn"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:text="🔗"
+            android:textSize="16sp"
+            android:background="@drawable/glass_circle"
+            android:textColor="#222222"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="124dp"
+            android:layout_marginEnd="16dp" />
+
         <LinearLayout
             android:id="@+id/dialogueBox"
             android:layout_width="match_parent"

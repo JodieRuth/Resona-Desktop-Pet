@@ -161,8 +161,7 @@ class ResonaService : Service() {
             sendStatusBroadcast(StatusMessage("connecting", "WebSocket 连接中", null))
             probeTcp(baseUrl)
             try {
-                startForeground(SERVICE_NOTIFICATION_ID, buildServiceNotification())
-                isForeground = true
+                startForegroundCompat()
             } catch (t: Throwable) {
                 reportServiceError("前台启动失败：${t.message ?: "unknown"}")
             }
@@ -192,10 +191,25 @@ class ResonaService : Service() {
         if (!ForegroundTracker.isForeground() && !forcePlayQueue.get()) return
         if (isForeground) return
         try {
-            startForeground(SERVICE_NOTIFICATION_ID, buildServiceNotification())
-            isForeground = true
+            startForegroundCompat()
         } catch (_: Exception) {
         }
+    }
+
+    private fun startForegroundCompat() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            startForeground(SERVICE_NOTIFICATION_ID, buildServiceNotification(),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+        } else if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(SERVICE_NOTIFICATION_ID, buildServiceNotification(),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            )
+        } else {
+            startForeground(SERVICE_NOTIFICATION_ID, buildServiceNotification())
+        }
+        isForeground = true
     }
 
  

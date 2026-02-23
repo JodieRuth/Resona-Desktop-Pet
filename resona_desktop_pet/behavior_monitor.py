@@ -457,6 +457,18 @@ class BehaviorMonitor(QThread):
             if self.config.use_ui_automation and pname in ["chrome.exe", "msedge.exe"]:
                 try:
                     import uiautomation as auto
+                    # Redirect uiautomation logs to the main logger
+                    auto.Logger.LogToConsole = False
+                    auto.Logger.LogToFile = False
+                    
+                    # Custom handler to redirect to main logger
+                    if not getattr(auto.Logger, "_redirected", False):
+                        def _log_redirect(msg, color=None, writeToFile=False):
+                            if msg:
+                                logging.info(f"[UIAutomation] {msg.strip()}")
+                        auto.Logger.Write = _log_redirect
+                        auto.Logger._redirected = True
+
                     ctrl = auto.ControlFromHandle(hwnd)
                     edit = ctrl.EditControl(Name="地址和搜索栏") or ctrl.EditControl(Name="Address and search bar")
                     if edit: url = edit.GetValuePattern().Value

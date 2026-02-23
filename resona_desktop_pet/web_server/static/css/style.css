@@ -306,26 +306,62 @@ body, html {
     .icon-btn { width: 34px; height: 34px; }
 }
 
-@media (max-width: 768px) {
-    #character-layer { height: 82vh; }
-    #character-img { max-height: 82vh; }
-    #dialogue-box { min-height: 96px; }
-    .dialogue-input-area { padding: 8px; }
-}
+@media screen and (max-width: 768px) and (orientation: portrait) {
+    #character-layer {
+        bottom: 0;
+        top: 0;
+        height: 100%;
+        align-items: center; 
+        padding-bottom: 120px; 
+    }
 
-@media (max-width: 480px) {
-    #character-layer { height: 76vh; }
-    #character-img { max-height: 76vh; }
+    #character-img {
+        max-height: 70vh; 
+        max-width: 90%;
+        object-fit: contain;
+    }
+
     #dialogue-box {
         width: 94vw;
         max-width: 94vw;
-        bottom: 8px;
+        bottom: 20px;
         padding: 10px;
-        min-height: 88px;
+        min-height: auto;
+        gap: 8px;
+        background: rgba(30, 30, 30, 0.85);
+        backdrop-filter: blur(8px);
     }
-    .dialogue-header { font-size: 0.95em; }
-    #text-input { font-size: 14px; }
-    .icon-btn { width: 30px; height: 30px; }
+
+    .dialogue-header {
+        font-size: 1em;
+        margin-bottom: 2px;
+    }
+
+    .dialogue-input-area {
+        padding: 6px;
+    }
+
+    #text-input {
+        font-size: 16px; 
+        padding: 5px;
+    }
+    
+    .icon-btn {
+        width: 40px; 
+        height: 40px;
+    }
+}
+
+@media (max-width: 480px) {
+    .setting-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+    .setting-item span {
+        align-self: flex-end;
+        text-align: right;
+    }
 }
 
 @media (max-width: 900px) and (orientation: landscape) {
