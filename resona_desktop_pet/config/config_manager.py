@@ -343,6 +343,26 @@ class ConfigManager:
 
 
     @property
+    def external_ws_enabled(self) -> bool:
+        return self.getboolean("ExternalAPI", "enabled", False)
+
+    @property
+    def external_ws_host(self) -> str:
+        return self.get("ExternalAPI", "host", "127.0.0.1")
+
+    @property
+    def external_ws_port(self) -> int:
+        return self.getint("ExternalAPI", "port", 12345)
+
+    @property
+    def external_ws_ignore_if_busy(self) -> bool:
+        return self.getboolean("ExternalAPI", "ignore_if_busy", True)
+
+    @property
+    def external_ws_return_status(self) -> bool:
+        return self.getboolean("ExternalAPI", "return_status", True)
+
+    @property
     def stt_enabled(self) -> bool:
         return self.getboolean("STT", "enabled", True)
 

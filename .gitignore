@@ -100,6 +100,56 @@ resona_tts_*/
 # config.cfg  # Uncomment if you don't want to track config
 
 # =========================
+# Minecraft Mod Development (Recursive)
+# =========================
+# Build & Runtime
+**/build/
+**/.gradle/
+**/bin/
+**/out/
+**/run/
+**/run_server/
+**/run_client/
+**/dump/
+**/logs/
+**/debug/
+**/reobf/
+**/eclipse/
+**/*.log
+**/*.litemod
+**/*.jar
+**/*.class
+
+# IDE Configs
+**/.idea/
+**/.vscode/
+**/.settings/
+**/.project
+**/.classpath
+**/.factorypath
+**/.nb-gradle/
+**/*.iml
+**/*.ipr
+**/*.iws
+**/*.launch
+
+# Gradle Wrapper (Keep necessary files)
+!**/gradle/wrapper/gradle-wrapper.jar
+!**/gradle/wrapper/gradle-wrapper.properties
+!**/gradlew
+!**/gradlew.bat
+**/gradle.properties
+
+# Minecraft Runtime Data
+**/mods/
+**/config/
+**/resourcepacks/
+**/saves/
+**/screenshots/
+**/shaderpacks/
+**/crash-reports/
+
+# =========================
 # Logs and temp files
 # =========================
 *.log

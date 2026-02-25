@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import time
+import websockets
 from pathlib import Path
 from typing import Optional
 from .session_manager import SessionManager
@@ -459,3 +460,110 @@ class WebServerThread(threading.Thread):
         config = uvicorn.Config(app, host=self.host, port=self.port, log_level="error", log_config=None)
         server = uvicorn.Server(config)
         server.run()
+
+class ExternalWSServerThread(threading.Thread):
+    def __init__(self, controller, loop, host, port):
+        super().__init__()
+        self.controller = controller
+        self.loop = loop
+        self.host = host
+        self.port = port
+        self.daemon = True
+        self._mod_socket = None
+        self._pending = {}
+
+    async def _handle_connection(self, websocket):
+        role = None
+        try:
+            async for message in websocket:
+                try:
+                    print(f"[ExternalWS] Message received: {message}")
+                    data = json.loads(message)
+                    if not isinstance(data, dict):
+                        if self.controller.config.external_ws_return_status:
+                            await websocket.send(json.dumps({"status": "error", "message": "Message must be a JSON object"}))
+                        continue
+                    
+                    msg_type = data.get("type")
+                    if msg_type == "mcp_register":
+                        role = data.get("role")
+                        if role == "minecraft_mod":
+                            self._mod_socket = websocket
+                            print("[ExternalWS] MCP mod registered")
+                        elif role == "mcp_client":
+                            print("[ExternalWS] MCP client registered")
+                        if self.controller.config.external_ws_return_status:
+                            await websocket.send(json.dumps({"status": "ok", "message": "registered"}))
+                        continue
+                    if msg_type == "mcp_response":
+                        req_id = data.get("id")
+                        future = self._pending.pop(req_id, None)
+                        if future and not future.done():
+                            future.set_result(data)
+                        continue
+                    if msg_type == "mcp_request":
+                        req_id = data.get("id") or f"mcp-{int(time.time() * 1000)}"
+                        if self._mod_socket is None:
+                            print("[ExternalWS] MCP request failed: mod not connected")
+                            await websocket.send(json.dumps({"type": "mcp_response", "id": req_id, "status": "error", "message": "minecraft mod not connected"}))
+                            continue
+                        data["id"] = req_id
+                        loop = asyncio.get_running_loop()
+                        future = loop.create_future()
+                        self._pending[req_id] = future
+                        try:
+                            await self._mod_socket.send(json.dumps(data))
+                        except Exception:
+                            self._pending.pop(req_id, None)
+                            self._mod_socket = None
+                            print("[ExternalWS] MCP request failed: mod send failed")
+                            await websocket.send(json.dumps({"type": "mcp_response", "id": req_id, "status": "error", "message": "minecraft mod send failed"}))
+                            continue
+                        try:
+                            resp = await asyncio.wait_for(future, timeout=2.5)
+                        except asyncio.TimeoutError:
+                            resp = {"type": "mcp_response", "id": req_id, "status": "error", "message": "timeout"}
+                        self._pending.pop(req_id, None)
+                        await websocket.send(json.dumps(resp))
+                        continue
+
+                    question = data.get("question")
+                    if not question or not isinstance(question, str) or not question.strip():
+                        if self.controller.config.external_ws_return_status:
+                            await websocket.send(json.dumps({"status": "error", "message": "JSON must contain a non-empty 'question' string field"}))
+                        continue
+
+                    if self.controller.config.external_ws_ignore_if_busy and self.controller.is_busy:
+                        print(f"[ExternalWS] Program is busy, ignoring question: {question}")
+                        if self.controller.config.external_ws_return_status:
+                             await websocket.send(json.dumps({"status": "ignored", "message": "Program is busy"}))
+                        continue
+                        
+                    print(f"[ExternalWS] Question received: {question}")
+                    self.controller.external_query_signal.emit(question)
+                    
+                    if self.controller.config.external_ws_return_status:
+                        await websocket.send(json.dumps({"status": "ok", "message": "Question submitted"}))
+
+                except json.JSONDecodeError:
+                    if self.controller.config.external_ws_return_status:
+                        await websocket.send(json.dumps({"status": "error", "message": "Invalid JSON format"}))
+                    continue
+        except Exception as e:
+            print(f"[ExternalWS] Connection error: {e}")
+        finally:
+            if role == "minecraft_mod" and self._mod_socket == websocket:
+                self._mod_socket = None
+
+    async def _start_server(self):
+        print(f"[ExternalWS] Listening on ws://{self.host}:{self.port}")
+        async with websockets.serve(self._handle_connection, self.host, self.port):
+            await asyncio.Future() 
+
+    def run(self):
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        try:
+            new_loop.run_until_complete(self._start_server())
+        except Exception as e:
+            print(f"[ExternalWS] Server failed: {e}")

@@ -398,7 +398,8 @@ class ApplicationController(QObject):
     stt_result_ready = Signal(object)
     request_stt_start = Signal()
     request_global_show = Signal()
-    pack_switch_ready = Signal()  
+    pack_switch_ready = Signal()
+    external_query_signal = Signal(str)
     def __init__(self, sovits_log_path: Optional[Path] = None):
         super().__init__()
         self.config = ConfigManager(str(project_root / "config.cfg"))
@@ -411,6 +412,9 @@ class ApplicationController(QObject):
         
         if self.config.html_enabled:
             QTimer.singleShot(3000, self._start_web_server)
+        
+        if self.config.external_ws_enabled:
+            QTimer.singleShot(4000, self._start_external_ws_server)
 
         log(f"[Debug] PackManager Data Loaded: {bool(pm.pack_data)}")
 
@@ -551,6 +555,7 @@ class ApplicationController(QObject):
         log("[PackSwitch] pack_changed signal connected")
         self.pack_switch_ready.connect(self._finalize_ui_after_pack_change, Qt.QueuedConnection)
         self.main_window.request_query.connect(self._handle_user_query)
+        self.external_query_signal.connect(self._handle_user_query)
         self.main_window.replay_requested.connect(self._replay_last_response)
         self.main_window.settings_requested.connect(self._show_settings)
         self.llm_response_ready.connect(self._handle_llm_response)
@@ -658,6 +663,11 @@ class ApplicationController(QObject):
 
         think_text = get_random_think_text()
         
+        if threading.current_thread() != threading.main_thread():
+            QTimer.singleShot(0, self.main_window.start_thinking)
+        else:
+            self.main_window.start_thinking()
+        
         think_img_url = None
         rel_path = pm.resolve_sprite_path(current_pack_id, current_outfit, "<E:thinking>")
         if rel_path:
@@ -761,6 +771,11 @@ class ApplicationController(QObject):
             idle_image_url = None
         await session.websocket.send_json({"type": "status", "state": "idle", "image_url": idle_image_url})
         await session_manager.broadcast_all({"type": "status", "state": "idle"})
+        
+        if threading.current_thread() != threading.main_thread():
+            QTimer.singleShot(0, self.main_window.finish_processing)
+        else:
+            self.main_window.finish_processing()
 
     async def handle_web_settings_update(self, settings: dict, session: ClientSession):
         session.touch()
@@ -868,11 +883,21 @@ class ApplicationController(QObject):
             "text": listen_text,
             "image_url": listen_img_url
         })
+        
+        if threading.current_thread() != threading.main_thread():
+            QTimer.singleShot(0, lambda: self.main_window.set_listening(True))
+        else:
+            self.main_window.set_listening(True)
 
     async def handle_web_audio(self, file_path: str, session: ClientSession):
         session.touch()
         log(f"[Web] handle_web_audio start path={file_path}")
         
+        if threading.current_thread() != threading.main_thread():
+            QTimer.singleShot(0, lambda: self.main_window.set_listening(False))
+        else:
+            self.main_window.set_listening(False)
+
         await session.websocket.send_json({
             "type": "status", 
             "state": "busy",
@@ -919,7 +944,14 @@ class ApplicationController(QObject):
              await self.handle_web_query(res.text, session)
 
     def _handle_user_query(self, text: str):
+        print(f"[Main] _handle_user_query called with: '{text}' (thread: {threading.current_thread().name})")
+        log(f"[Main] _handle_user_query called with: '{text}' (thread: {threading.current_thread().name})")
         if not text.strip(): return
+
+        if self.is_busy:
+            log(f"[Main] Program is busy, ignoring user query: {text}")
+            return
+            
         log(f"[Main] User query received: {text}")
         watchdog_time = (self.config.sovits_timeout + 10) * 1000
         self._busy_watchdog.start(watchdog_time)
@@ -988,6 +1020,20 @@ class ApplicationController(QObject):
             log(f"[Main] Web server started on {self.config.html_host}:{self.config.html_port}")
         except Exception as e:
             log(f"[Main] Failed to start web server: {e}")
+
+    def _start_external_ws_server(self):
+        try:
+            from resona_desktop_pet.web_server import ExternalWSServerThread
+            self.external_ws_thread = ExternalWSServerThread(
+                self,
+                self._loop,
+                self.config.external_ws_host,
+                self.config.external_ws_port
+            )
+            self.external_ws_thread.start()
+            log(f"[Main] External WebSocket server started on {self.config.external_ws_host}:{self.config.external_ws_port}")
+        except Exception as e:
+            log(f"[Main] Failed to start external WS server: {e}")
 
     def _trigger_voice_response(self, text, emotion, voice_file=None, is_behavior=False, tts_text=None, tts_lang=None):
         if is_behavior and self.config.disable_actions:
@@ -1150,6 +1196,8 @@ class ApplicationController(QObject):
                 return
 
             if action.get("type") == "speak":
+                try: self.audio_player.playback_finished.disconnect(execute_next)
+                except: pass
                 self.audio_player.playback_finished.connect(execute_next)
                 self._trigger_voice_response(action.get("text", ""), action.get("emotion", "<E:smile>"), action.get("voice_file"), is_behavior=True)
                 return
