@@ -159,16 +159,30 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                         log(f"[TTS] Audio saved to: {output_path}")
                         if os.path.getsize(output_path) == 0: return TTSResult(error="Generated audio is empty")
                         import soundfile as sf
+                        import subprocess
                         try:
                             info = sf.info(output_path)
                             data, sr = sf.read(output_path, dtype="float32")
                             duration = len(data) / sr
-                            log(f"[TTS] Audio duration: {duration:.2f}s")
-                            if info.subtype != "PCM_16":
+                            log(f"[TTS] Audio duration: {duration:.2f}s, sr={sr}Hz, subtype={info.subtype}")
+                            TARGET_SR = 44100
+                            if info.subtype != "PCM_16" or sr != TARGET_SR:
                                 pcm_path = output_path.replace(".wav", "_pcm16.wav")
-                                sf.write(pcm_path, data, sr, subtype="PCM_16")
-                                log(f"[TTS] Audio converted to PCM_16: {pcm_path}")
-                                output_path = pcm_path
+                                # 优先用项目本地 ffmpeg，找不到再用系统 PATH
+                                ffmpeg_local = self.project_root / "ffmpeg" / "bin" / "ffmpeg.exe"
+                                ffmpeg_cmd = str(ffmpeg_local) if ffmpeg_local.exists() else "ffmpeg"
+                                result = subprocess.run([
+                                    ffmpeg_cmd, "-y", "-i", output_path,
+                                    "-ar", str(TARGET_SR),
+                                    "-ac", "1",
+                                    "-sample_fmt", "s16",
+                                    pcm_path
+                                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                log(f"[TTS] FFmpeg resample exit={result.returncode}, {sr}Hz -> {TARGET_SR}Hz PCM_16 (cmd={ffmpeg_cmd})")
+                                if result.returncode == 0:
+                                    output_path = pcm_path
+                                else:
+                                    log(f"[TTS] FFmpeg failed: {result.stderr.decode('utf-8', errors='ignore')[-200:]}")
                             return TTSResult(audio_path=output_path, duration=duration)
                         except Exception as e:
                             log(f"[TTS] Failed to read audio duration: {e}")
