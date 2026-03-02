@@ -380,7 +380,8 @@ class SettingsDialog(QDialog):
             "6: Grok (xAI)",
             "7: Qwen (Aliyun)",
             "8: GitHub Models",
-            "9: OpenAI Compatible"
+            "9: OpenAI Compatible",
+            "10: Zhipu (GLM)"
         ])
         self.model_select_combo.currentIndexChanged.connect(self._on_model_changed)
         model_layout.addRow("Provider (need restart):", self.model_select_combo)
@@ -800,10 +801,11 @@ class SettingsDialog(QDialog):
             7: "Model_7_Qwen",
             8: "Model_8_GitHub",
             9: "Model_9_OpenAI_Compatible",
+            10: "Model_10_Zhipu",
         }
         
         if hasattr(self.config, 'config'):
-            for i in range(7, 10):
+            for i in range(7, 11):
                 prefix = f"Model_{i}"
                 for section in self.config.config.sections():
                     if section.startswith(prefix):

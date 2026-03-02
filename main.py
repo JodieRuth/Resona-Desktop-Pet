@@ -506,6 +506,13 @@ class ApplicationController(QObject):
                 sys.exit(1)
         self.mcp_manager = MCPManager(self.config)
         self.llm_backend = LLMBackend(self.config, log_path=llm_log_file, mcp_manager=self.mcp_manager)
+        
+        self._current_watchdog_interval = 300000  
+        def reset_watchdog():
+            if self._busy_watchdog.isActive():
+                self._busy_watchdog.start(self._current_watchdog_interval)
+        self.llm_backend.set_on_activity_callback(reset_watchdog)
+        
         self.tts_backend = TTSBackend(self.config, sovits_log_path=sovits_log_path)
         self.stt_backend = STTBackend(self.config)
         self._loop = asyncio.new_event_loop()
@@ -953,8 +960,8 @@ class ApplicationController(QObject):
             return
             
         log(f"[Main] User query received: {text}")
-        watchdog_time = (self.config.sovits_timeout + 10) * 1000
-        self._busy_watchdog.start(watchdog_time)
+        self._current_watchdog_interval = 300000
+        self._busy_watchdog.start(self._current_watchdog_interval)
         self.main_window.start_thinking()
         asyncio.run_coroutine_threadsafe(self._query_llm(text), self._loop)
     async def _query_llm(self, text: str):
@@ -971,6 +978,11 @@ class ApplicationController(QObject):
     def _handle_llm_response(self, response):
         self._last_llm_response = response
         log(f"[Main] LLM response returned. Error={response.error}")
+        
+        self._current_watchdog_interval = (self.config.sovits_timeout + 15) * 1000
+        if self._busy_watchdog.isActive():
+            self._busy_watchdog.start(self._current_watchdog_interval)
+
         if response.error:
             self._show_error_response("llm_generic_error", response.error)
             return

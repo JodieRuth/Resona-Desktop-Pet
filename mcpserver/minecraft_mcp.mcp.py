@@ -62,7 +62,7 @@ class ExternalWsMcpClient:
                 print(f"[MinecraftMCP] ExternalWS disconnected, retrying...")
                 await asyncio.sleep(1.0)
 
-    def request(self, action: str, payload: dict, timeout: float = 2.5):
+    def call(self, action: str, payload: dict, timeout: float = 2.5):
         if not self._connected.wait(timeout=1.0):
             return {
                 "type": "mcp_response",
@@ -75,7 +75,7 @@ class ExternalWsMcpClient:
         entry = {"event": threading.Event(), "data": None}
         with self._lock:
             self._pending[req_id] = entry
-        message = {"type": "mcp_request", "id": req_id, "action": action}
+        message = {"type": "mcp_request", "id": req_id, "action": action, "target": "minecraft_mod"}
         if payload:
             message.update(payload)
         try:

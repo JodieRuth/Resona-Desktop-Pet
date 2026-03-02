@@ -219,11 +219,16 @@ class MainWindow(QWidget):
         self.set_emotion("<E:thinking>")
         status_name = f"[{self.config.character_name}] Thinking..."
         self.dialogue.show_name(status_name)
+        
+        self.set_input_locked(True, "Thinking...")
+        
         if self.config.thinking_text_enabled:
             self.show_thinking_text()
             if self.config.thinking_text_switch:
                 self.thinking_switch_timer.stop()
                 self.thinking_switch_timer.start(int(self.config.thinking_text_switch_time * 1000))
+        else:
+            self.io.show_status("Thinking...")
 
     def on_query_submitted(self, text: str):
         if self.is_listening: return
@@ -281,11 +286,11 @@ class MainWindow(QWidget):
         else:
             self.schedule_idle_fade()
 
-    def set_input_locked(self, locked: bool):
+    def set_input_locked(self, locked: bool, placeholder: str = None):
         self.io.edit.setReadOnly(locked)
         if locked:
             self.io.edit.clear()
-            self.io.edit.setPlaceholderText("Listening...")
+            self.io.edit.setPlaceholderText(placeholder if placeholder else "Listening...")
         else:
             self.io.edit.setPlaceholderText("Type and press Enter...")
 

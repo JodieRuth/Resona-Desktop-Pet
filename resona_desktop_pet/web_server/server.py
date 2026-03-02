@@ -469,15 +469,24 @@ class ExternalWSServerThread(threading.Thread):
         self.host = host
         self.port = port
         self.daemon = True
-        self._mod_socket = None
+        self._sockets = {} 
         self._pending = {}
+
+    def _format_ws_log(self, message: str) -> str:
+        if not isinstance(message, str):
+            message = str(message)
+        if len(message) <= 800:
+            return message
+        head = message[:320]
+        tail = message[-200:]
+        return f"{head} ... ({len(message)} chars) ... {tail}"
 
     async def _handle_connection(self, websocket):
         role = None
         try:
             async for message in websocket:
                 try:
-                    print(f"[ExternalWS] Message received: {message}")
+                    print(f"[ExternalWS] Message received: {self._format_ws_log(message)}")
                     data = json.loads(message)
                     if not isinstance(data, dict):
                         if self.controller.config.external_ws_return_status:
@@ -487,13 +496,15 @@ class ExternalWSServerThread(threading.Thread):
                     msg_type = data.get("type")
                     if msg_type == "mcp_register":
                         role = data.get("role")
-                        if role == "minecraft_mod":
-                            self._mod_socket = websocket
-                            print("[ExternalWS] MCP mod registered")
-                        elif role == "mcp_client":
-                            print("[ExternalWS] MCP client registered")
+                        prefixes = data.get("prefixes", [])
+                        if role:
+                            self._sockets[role] = {
+                                "socket": websocket,
+                                "prefixes": prefixes
+                            }
+                            print(f"[ExternalWS] Role registered: {role} (Prefixes: {prefixes})")
                         if self.controller.config.external_ws_return_status:
-                            await websocket.send(json.dumps({"status": "ok", "message": "registered"}))
+                            await websocket.send(json.dumps({"status": "ok", "message": f"Registered as {role}"}))
                         continue
                     if msg_type == "mcp_response":
                         req_id = data.get("id")
@@ -503,21 +514,49 @@ class ExternalWSServerThread(threading.Thread):
                         continue
                     if msg_type == "mcp_request":
                         req_id = data.get("id") or f"mcp-{int(time.time() * 1000)}"
-                        if self._mod_socket is None:
-                            print("[ExternalWS] MCP request failed: mod not connected")
-                            await websocket.send(json.dumps({"type": "mcp_response", "id": req_id, "status": "error", "message": "minecraft mod not connected"}))
+                        
+                        target = data.get("target")
+                        if not target:
+                            method = data.get("method", "")
+                            params = data.get("params", {})
+                            action = data.get("action", "")
+                            tool_name = params.get("name", "") or action or method
+                            
+                            for r, info in self._sockets.items():
+                                if any(tool_name.startswith(p + "_") or p in tool_name for p in info.get("prefixes", [])):
+                                    target = r
+                                    break
+                            
+                            if not target:
+                                if "minecraft" in tool_name: target = "minecraft_mod"
+                                elif "sts" in tool_name: target = "sts_mod"
+
+                        target_info = self._sockets.get(target)
+                        target_socket = target_info["socket"] if target_info else None
+                        
+                        if not target_socket:
+                            mod_roles = [r for r in self._sockets.keys() if r.endswith("_mod")]
+                            if mod_roles:
+                                target = mod_roles[0]
+                                target_socket = self._sockets[target]["socket"]
+
+                        if not target_socket:
+                            print(f"[ExternalWS] MCP request failed: target '{target}' not connected")
+                            await websocket.send(json.dumps({"type": "mcp_response", "id": req_id, "status": "error", "message": f"Target mod '{target}' not connected"}))
                             continue
+                            
                         data["id"] = req_id
                         loop = asyncio.get_running_loop()
                         future = loop.create_future()
                         self._pending[req_id] = future
                         try:
-                            await self._mod_socket.send(json.dumps(data))
+                            await target_socket.send(json.dumps(data))
                         except Exception:
                             self._pending.pop(req_id, None)
-                            self._mod_socket = None
-                            print("[ExternalWS] MCP request failed: mod send failed")
-                            await websocket.send(json.dumps({"type": "mcp_response", "id": req_id, "status": "error", "message": "minecraft mod send failed"}))
+                            if target in self._sockets:
+                                del self._sockets[target]
+                            print(f"[ExternalWS] MCP request failed: send to '{target}' failed")
+                            await websocket.send(json.dumps({"type": "mcp_response", "id": req_id, "status": "error", "message": f"Send to '{target}' failed"}))
                             continue
                         try:
                             resp = await asyncio.wait_for(future, timeout=2.5)
@@ -525,6 +564,62 @@ class ExternalWSServerThread(threading.Thread):
                             resp = {"type": "mcp_response", "id": req_id, "status": "error", "message": "timeout"}
                         self._pending.pop(req_id, None)
                         await websocket.send(json.dumps(resp))
+                        continue
+
+                    if msg_type == "log":
+                        level = data.get("level", "info")
+                        message_text = data.get("message", "")
+                        if message_text:
+                            print(f"[ExternalWS:{level}] {message_text}")
+                        if self.controller.config.external_ws_return_status:
+                            await websocket.send(json.dumps({"status": "ok", "message": "log received"}))
+                        continue
+
+                    if msg_type == "config_request":
+                        cfg = self.controller.config.get_llm_config() if self.controller else {}
+                        await websocket.send(json.dumps({
+                            "type": "config_response",
+                            "id": data.get("id"),
+                            "max_tokens": cfg.get("max_tokens", 512),
+                            "temperature": cfg.get("temperature", 0.7),
+                            "top_p": cfg.get("top_p", 1.0)
+                        }))
+                        continue
+
+                    if msg_type == "llm_request":
+                        req_id = data.get("id") or f"llm-{int(time.time() * 1000)}"
+                        try:
+                            messages = data.get("messages") or []
+                            temperature = data.get("temperature", 0.7)
+                            top_p = data.get("top_p", 1.0)
+                            max_tokens = data.get("max_tokens", 500)
+                            result = await self.controller.llm_backend.query_raw(
+                                messages=messages,
+                                temperature=temperature,
+                                top_p=top_p,
+                                max_tokens=max_tokens
+                            )
+                            await websocket.send(json.dumps({
+                                "type": "llm_response",
+                                "id": req_id,
+                                "status": "ok",
+                                "raw_text": result.get("raw_text", ""),
+                                "reasoning": result.get("reasoning", "")
+                            }))
+                        except Exception as e:
+                            print(f"[ExternalWS] llm_request failed: {e}")
+                            await websocket.send(json.dumps({"type": "llm_response", "id": req_id, "status": "error", "message": str(e)}))
+                        continue
+
+                    if msg_type == "task_finished":
+                        report = data.get("report")
+                        mode = data.get("mode")
+                        if report:
+                            print(f"[ExternalWS] Subagent result ({mode}): {report}")
+                        if self.controller.llm_backend:
+                            self.controller.llm_backend.set_subagent_result(mode, report)
+                        if self.controller.config.external_ws_return_status:
+                            await websocket.send(json.dumps({"status": "ok", "message": "report stored"}))
                         continue
 
                     question = data.get("question")
@@ -552,8 +647,9 @@ class ExternalWSServerThread(threading.Thread):
         except Exception as e:
             print(f"[ExternalWS] Connection error: {e}")
         finally:
-            if role == "minecraft_mod" and self._mod_socket == websocket:
-                self._mod_socket = None
+            if role and self._sockets.get(role, {}).get("socket") == websocket:
+                del self._sockets[role]
+                print(f"[ExternalWS] Role disconnected: {role}")
 
     async def _start_server(self):
         print(f"[ExternalWS] Listening on ws://{self.host}:{self.port}")

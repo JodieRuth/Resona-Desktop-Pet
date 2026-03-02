@@ -104,6 +104,8 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
         except: return False
     async def synthesize(self, text: str, emotion: str = "<E:smile>", language: Optional[str] = None, pack_id: Optional[str] = None) -> TTSResult:
         if not self.config.sovits_enabled: return TTSResult(error="TTS is disabled")
+        text = text.replace("\u30fb", " ")
+        
         log(f"[TTS] Synthesizing: {text[:30]}... ({emotion}) pack={pack_id}")
         if not await self.load_model():
             log("[TTS] SoVITS API not available")
@@ -128,10 +130,13 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
 
             log(f"[TTS] Using reference audio: {ref_wav_path} with language: {ref_lang} (Prompt: {prompt_lang})")
             output_path = os.path.join(self._temp_dir, f"output_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.wav")
+            prompt_text = emotion_config.get("ref_text", "")
+            prompt_text = prompt_text.replace("\u30fb", " ")
+            
             payload = {
                 "text": text, "text_lang": ref_lang,
                 "ref_audio_path": str(ref_wav_path.absolute()),
-                "prompt_text": emotion_config.get("ref_text", ""),
+                "prompt_text": prompt_text,
                 "prompt_lang": prompt_lang,
                 "top_k": int(self.config.sovits_top_k), "top_p": float(self.config.sovits_top_p),
                 "temperature": float(self.config.sovits_temperature), "speed_factor": float(self.config.sovits_speed),

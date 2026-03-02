@@ -36,16 +36,29 @@ class MCPManager:
         self._sessions: Dict[str, ClientSession] = {}
         self._tool_index: Dict[str, Dict[str, Any]] = {}
         self._tools_cache: List[Dict[str, Any]] = []
+        self._tools_cache_meta: List[Dict[str, Any]] = []
+        self._server_has_public: Dict[str, bool] = {}
         self._started = False
         register_cleanup(self.stop_sync)
 
     def has_tools(self) -> bool:
         return bool(self._tools_cache)
 
-    def get_tools(self) -> List[Dict[str, Any]]:
+    def get_tools(self, public_only: bool = True) -> List[Dict[str, Any]]:
         if not self.enabled:
             return []
-        return list(self._tools_cache)
+        if not public_only:
+            return list(self._tools_cache)
+        tools = [t for t in self._tools_cache if "[PRIVATE]" not in t.get("function", {}).get("description", "")]
+        hide_prefixes = self.config.get("MCP", "hide_public_prefixes", "")
+        if hide_prefixes:
+            prefixes = [p.strip() for p in hide_prefixes.split(",") if p.strip()]
+            if prefixes:
+                tools = [t for t in tools if not any(t.get("function", {}).get("name", "").startswith(p) for p in prefixes)]
+        return tools
+
+    def get_tool_metadata(self, name: str) -> Dict[str, Any]:
+        return self._tool_index.get(name, {})
 
     def _scan_server_specs(self) -> List[MCPServerSpec]:
         if not self.server_dir.exists():
@@ -137,8 +150,24 @@ class MCPManager:
                             "parameters": params
                         }
                     }
-                    self._tool_index[tool.name] = {"session": session, "server": spec.name}
+                    desc = tool.description or ""
+                    is_public = "[PUBLIC]" in desc
+                    is_subagent = "[SUBAGENT]" in desc
+                    if is_public:
+                        self._server_has_public[spec.name] = True
+                    self._tool_index[tool.name] = {
+                        "session": session,
+                        "server": spec.name,
+                        "public": is_public,
+                        "subagent": is_subagent
+                    }
                     self._tools_cache.append(tool_def)
+                    self._tools_cache_meta.append({
+                        "tool": tool_def,
+                        "server": spec.name,
+                        "public": is_public,
+                        "subagent": is_subagent
+                    })
                     tool_names.append(tool.name)
                 self._sessions[spec.name] = session
                 logger.info(f"[MCP] Server ready: {spec.name} tools={tool_names}")
@@ -168,6 +197,8 @@ class MCPManager:
             self._sessions.clear()
             self._tool_index.clear()
             self._tools_cache.clear()
+            self._tools_cache_meta.clear()
+            self._server_has_public.clear()
             self._started = False
 
     def stop_sync(self) -> None:
@@ -185,26 +216,42 @@ class MCPManager:
         if not entry:
             raise RuntimeError(f"MCP tool not found: {name}")
         session: ClientSession = entry["session"]
-        result = await session.call_tool(name, arguments)
-        return self._format_result_content(result)
+        try:
+            result = await session.call_tool(name, arguments)
+            logger.info(f"[MCP] Raw tool result for {name}: {result}")
+            formatted = self._format_result_content(result)
+            if not formatted:
+                logger.warning(f"[MCP] Tool {name} returned empty content. Raw: {result}")
+            return formatted
+        except Exception as e:
+            logger.error(f"[MCP] Error calling tool {name}: {e}")
+            raise
 
     def _format_result_content(self, result: Any) -> str:
         content = getattr(result, "content", None)
         if content is None and isinstance(result, dict):
             content = result.get("content")
+        
         if content is None:
-            return ""
+            if hasattr(result, "text"):
+                return getattr(result, "text")
+            return str(result) if result is not None else ""
+
         if isinstance(content, list):
             parts = []
             for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        parts.append(item.get("text", ""))
-                    else:
-                        parts.append(str(item))
+                item_type = item.get("type") if isinstance(item, dict) else getattr(item, "type", None)
+                item_text = item.get("text") if isinstance(item, dict) else getattr(item, "text", None)
+                
+                if item_type == "text" and item_text is not None:
+                    parts.append(item_text)
+                elif item_text is not None:
+                    parts.append(item_text)
                 else:
                     parts.append(str(item))
-            return "\n".join([p for p in parts if p is not None])
+            return "\n".join([p for p in parts if p is not None]).strip()
+        
         if isinstance(content, str):
-            return content
-        return str(content)
+            return content.strip()
+            
+        return str(content).strip()

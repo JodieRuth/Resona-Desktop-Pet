@@ -65,6 +65,7 @@ class LLMBackend:
         self.log_path = log_path
         self.history = ConversationHistory(max_rounds=config.max_rounds)
         self._mcp_manager = mcp_manager
+        self._subagent_results: Dict[str, str] = {}
         
         self._active_model_name = None
         self._active_model_signature = None
@@ -72,11 +73,26 @@ class LLMBackend:
         self._ocr_same_count = 0
         self._ocr_disabled = False
         self._ip_context = None
-
-        if self.config.ocr_enabled:
-            self.config.get_ocr_config()
+        self._last_ip_fetch_time = 0
+        self._on_activity_callback = None
         
-        if self.config.enable_ip_context:
+        if config.enable_ip_context:
+            import threading
+            threading.Thread(target=self._fetch_ip_context_sync, daemon=True).start()
+        
+    def set_on_activity_callback(self, callback: Callable[[], None]):
+        self._on_activity_callback = callback
+
+    def set_subagent_result(self, mode: str, report: str):
+        self._subagent_results[mode] = report
+
+    def _notify_activity(self):
+        if self._on_activity_callback:
+            self._on_activity_callback()
+
+        import time
+        current_time = time.time()
+        if self.config.enable_ip_context and (self._ip_context is None or current_time - self._last_ip_fetch_time > 3600):
             import threading
             threading.Thread(target=self._fetch_ip_context_sync, daemon=True).start()
         
@@ -84,6 +100,8 @@ class LLMBackend:
 
     def _fetch_ip_context_sync(self):
         try:
+            import time
+            self._last_ip_fetch_time = time.time()
             response = requests.get("http://ip-api.com/json/?lang=zh-CN", timeout=5)
             if response.status_code == 200:
                 data = response.json()
@@ -93,8 +111,10 @@ class LLMBackend:
                     region = data.get("regionName")
                     city = data.get("city")
                     isp = data.get("isp")
-                    self._ip_context = f"{ip} ({country}, {region}, {city}, ISP: {isp})"
-                    print(f"[LLM] IP Context initialized: {self._ip_context}")
+                    new_ip_context = f"{ip} ({country}, {region}, {city}, ISP: {isp})"
+                    if self._ip_context != new_ip_context:
+                        self._ip_context = new_ip_context
+                        print(f"[LLM] IP Context initialized: {self._ip_context}")
                 else:
                     print(f"[LLM] IP-API error: {data.get('message')}")
         except Exception as e:
@@ -107,9 +127,13 @@ class LLMBackend:
         api_key = llm_cfg["api_key"]
         base_url = llm_cfg.get("base_url", "")
         
+        new_signature = (model_type, model_name, api_key, base_url)
+        if new_signature == self._active_model_signature:
+            return
+
         print(f"[LLM] Initializing LLM session for: {model_name}")
         self._active_model_name = model_name
-        self._active_model_signature = (model_type, model_name, api_key, base_url)
+        self._active_model_signature = new_signature
         print(f"[LLM] Client metadata initialized.")
 
     def _get_precise_time_context(self) -> str:
@@ -132,10 +156,104 @@ class LLMBackend:
 
     def _get_mcp_system_instruction(self) -> str:
         return (
-            "If tools are available, use them when needed. "
-            "When you call a tool, do not return JSON in that turn. "
-            "After tool results are provided, reply with one final JSON only."
+            "If tools are available, use them as many times as needed to complete the task. "
+            "Do not stop until the task goals are fully achieved. "
+            "When calling a tool, do not return the final JSON in that turn. "
+            "Only return the final JSON once the task is complete or you require user input."
         )
+
+    def _get_subagent_system_prompt(self) -> str:
+        return (
+            "You are a sub-agent. Execute the requested task using tools. "
+            "Use tools until the task is complete, then return a concise report."
+        )
+
+    def _prune_subagent_history(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if len(messages) <= 3:
+            return messages
+            
+        new_messages = [messages[0]]
+        
+        first_user_msg = messages[1].copy()
+        content = first_user_msg["content"]
+        for block in ["[INITIAL_STATE]", "[YOUR PREVIOUS THOUGHTS]", "[RECENT THOUGHTS]", "[MANDATORY INSTRUCTION]"]:
+            if block in content:
+                content = content.split(block)[0].strip()
+        first_user_msg["content"] = content + "\n\n(Initial state omitted. See latest tool result for current battlefield.)"
+        new_messages.append(first_user_msg)
+        
+
+        last_assistant_idx = -1
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "assistant":
+                last_assistant_idx = i
+                break
+        
+        if last_assistant_idx != -1 and last_assistant_idx > 1:
+            new_messages.extend(messages[last_assistant_idx:])
+        elif len(messages) > 2:
+            new_messages.append(messages[-1])
+        
+        log(f"[SubAgent] Aggressive pruning: {len(messages)} -> {len(new_messages)} messages.")
+        return new_messages
+
+    async def _run_subagent(
+        self,
+        tool_name: str,
+        user_question: str,
+        pack_id: Optional[str]
+    ) -> str:
+        if not self._mcp_manager:
+            return "SubAgent error: MCP manager not available."
+        
+        log(f"[SubAgent] Initializing delegation: {tool_name}")
+        
+        mode = "battle" if "battle" in tool_name else "turn"
+        
+        if mode in self._subagent_results:
+            del self._subagent_results[mode]
+            
+        try:
+            res = await self._mcp_manager.call_tool(tool_name, {"question": user_question})
+            log(f"[SubAgent] Call tool result: {res}")
+            
+            if not res or not res.strip():
+                 return f"SubAgent error: MCP tool '{tool_name}' returned empty result."
+            
+            try:
+                res_data = json.loads(res) if isinstance(res, str) else res
+            except json.JSONDecodeError:
+
+                res_data = {"status": "ok", "message": res}
+            
+            if isinstance(res_data, dict) and res_data.get("status") == "delegate":
+                log(f"[SubAgent] Waiting for Java Mod to finish {mode}...")
+                
+
+                timeout = 600 
+                import time
+                start_wait = time.time()
+                while mode not in self._subagent_results:
+                    if time.time() - start_wait > timeout:
+                        return f"SubAgent error: Timeout waiting for Java Mod ({mode}) to report result."
+                    await asyncio.sleep(0.5)
+                
+                report = self._subagent_results.pop(mode)
+                log(f"[SubAgent] Received result from Java Mod: {report[:100]}...")
+                return report
+            elif isinstance(res_data, dict) and res_data.get("status") == "error":
+                return f"SubAgent delegation failed: {res_data.get('message', 'Unknown error')}"
+            else:
+                return str(res)
+        except Exception as e:
+            import traceback
+            log(f"[SubAgent] Fatal Error: {traceback.format_exc()}")
+            return f"SubAgent delegation error: {e}"
+
+    def _prune_subagent_history(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if len(messages) <= 4:
+            return messages
+        return messages
 
     def _extract_tool_calls(self, response: Any) -> List[Any]:
         if isinstance(response, dict):
@@ -171,6 +289,16 @@ class LLMBackend:
     def _build_messages(self, question: str, extra_context: Optional[str] = None, history: Optional[ConversationHistory] = None, pack_id: Optional[str] = None, source: str = "desktop") -> list:
         messages = []
         system_prompt = self.config.get_prompt(pack_id=pack_id)
+        
+        context_parts = []
+        if self.config.enable_time_context:
+            context_parts.append(f"[Local Time: {self._get_precise_time_context()}]")
+        if self.config.enable_ip_context and self._ip_context:
+            context_parts.append(f"[User IP: {self._ip_context}]")
+        
+        if context_parts:
+            system_prompt = f"{system_prompt}\n\nEnvironment Context:\n" + "\n".join(context_parts)
+
         if source == "desktop" and self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
             system_prompt = f"{system_prompt}\n\n{self._get_mcp_system_instruction()}"
         
@@ -191,12 +319,6 @@ class LLMBackend:
         messages.append({"role": "system", "content": system_prompt})
 
         question_blocks = []
-        if self.config.enable_time_context:
-            time_info = self._get_precise_time_context()
-            question_blocks.append(f"[Local Time: {time_info}]")
-        if self.config.enable_ip_context and self._ip_context:
-            question_blocks.append(f"[User IP: {self._ip_context}]")
-        
         if source and source != "desktop":
             question_blocks.append(f"[Request Source: {source}]")
 
@@ -255,7 +377,7 @@ class LLMBackend:
             provider = "gemini"
         elif model_type == 6:
             provider = "xai"
-        elif model_type in [7, 8, 9]:
+        elif model_type in [7, 8, 9, 10]:
             provider = "openai"
         if provider:
             return f"{provider}/{model_name}"
@@ -450,6 +572,9 @@ class LLMBackend:
                         new_dict[k] = v[:50] + "... [BASE64 TRUNCATED]"
                     elif k == "data" and isinstance(v, str) and len(v) > 200:
                         new_dict[k] = v[:50] + "... [BASE64 TRUNCATED]"
+                    elif k == "content" and isinstance(v, str) and "[User IP:" in v:
+                        import re
+                        new_dict[k] = re.sub(r"\[User IP:.*?\]", "[User IP: MASKED]", v)
                     else:
                         new_dict[k] = mask_base64(v)
                 return new_dict
@@ -463,12 +588,54 @@ class LLMBackend:
             with open(self.log_path, "a", encoding="utf-8") as f:
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 f.write(f"\n={'='*20} {ts} {'='*20}\n")
-                f.write(f"[REQUEST]\n{json.dumps(safe_data, ensure_ascii=False, indent=2)}\n")
+                if isinstance(safe_data, str):
+                    f.write(f"[STATUS] {safe_data}\n")
+                else:
+                    if isinstance(safe_data, dict) and "messages" in safe_data:
+                        msgs = safe_data["messages"]
+                        if len(msgs) > 3:
+                            compact_data = copy.deepcopy(safe_data)
+                            compact_data["messages"] = [msgs[0], "... [HISTORY TRUNCATED] ...", msgs[-1]]
+                            f.write(f"[REQUEST (COMPACT)]\n{json.dumps(compact_data, ensure_ascii=False, indent=2)}\n")
+                        else:
+                            f.write(f"[REQUEST]\n{json.dumps(safe_data, ensure_ascii=False, indent=2)}\n")
+                    else:
+                        f.write(f"[REQUEST]\n{json.dumps(safe_data, ensure_ascii=False, indent=2)}\n")
+                
                 f.write(f"[RESPONSE RAW]\n{response_raw}\n")
             
-            llm_logger.info(f"Interaction logged to {self.log_path.name}")
+            # llm_logger.info(f"Interaction logged to {self.log_path.name}")
         except Exception as e:
             print(f"[LLM] Logging error: {e}")
+
+    def _extract_usage_stats(self, response: Any) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
+        usage = None
+        if hasattr(response, "usage") and response.usage:
+            usage = response.usage
+        elif isinstance(response, dict):
+            usage = response.get("usage")
+            
+        if usage:
+            prompt = getattr(usage, "prompt_tokens", None) or usage.get("prompt_tokens") if isinstance(usage, dict) else getattr(usage, "prompt_tokens", None)
+            if prompt is None:
+                prompt = getattr(usage, "input_tokens", None) or (usage.get("input_tokens") if isinstance(usage, dict) else None)
+                
+            completion = getattr(usage, "completion_tokens", None) or (usage.get("completion_tokens") if isinstance(usage, dict) else None)
+            if completion is None:
+                completion = getattr(usage, "output_tokens", None) or (usage.get("output_tokens") if isinstance(usage, dict) else None)
+                
+            total = getattr(usage, "total_tokens", None) or (usage.get("total_tokens") if isinstance(usage, dict) else None)
+            
+            cached = None
+            prompt_details = getattr(usage, "prompt_tokens_details", None) or (usage.get("prompt_tokens_details") if isinstance(usage, dict) else None)
+            if prompt_details:
+                cached = getattr(prompt_details, "cached_tokens", None) or (prompt_details.get("cached_tokens") if isinstance(prompt_details, dict) else None)
+            
+            if cached is None:
+                cached = getattr(usage, "cached_tokens", None) or (usage.get("cached_tokens") if isinstance(usage, dict) else None)
+                
+            return prompt, completion, total, cached
+        return None, None, None, None
 
     async def _call_litellm_raw(
         self,
@@ -500,7 +667,8 @@ class LLMBackend:
             request_payload["tools"] = tools
             if tool_choice:
                 request_payload["tool_choice"] = tool_choice
-        self._log_interaction(request_payload, "WAITING...")
+        
+        # self._log_interaction(request_payload, "WAITING...")
         print(f"[LLM] Sending to {resolved_model}")
         response = await acompletion(
             model=resolved_model,
@@ -513,6 +681,11 @@ class LLMBackend:
             tools=tools or None,
             tool_choice=tool_choice or None
         )
+        prompt_tokens, completion_tokens, total_tokens, cached_tokens = self._extract_usage_stats(response)
+        if prompt_tokens is not None or completion_tokens is not None or total_tokens is not None or cached_tokens is not None:
+            log(f"Token usage: prompt={prompt_tokens} completion={completion_tokens} total={total_tokens} cached={cached_tokens}")
+        else:
+            log("Token usage: unavailable")
         raw_text, reasoning = self._extract_litellm_message(response)
         for tag in ["think", "thinking"]:
             if f"<{tag}>" in raw_text:
@@ -523,7 +696,7 @@ class LLMBackend:
                     raw_text = re.sub(pattern, "", raw_text, flags=re.DOTALL).strip()
         tool_calls = self._extract_tool_calls(response)
         log_content = f"[Reasoning]\n{reasoning}\n\n[Content]\n{raw_text}" if reasoning else raw_text
-        self._log_interaction("DONE", log_content)
+        self._log_interaction(request_payload, log_content)
         return response, raw_text, reasoning, tool_calls
 
     async def _query_litellm(
@@ -538,6 +711,7 @@ class LLMBackend:
         max_tokens: int = 500
     ) -> LLMResponse:
         try:
+            self._notify_activity()
             _, raw_text, reasoning, _ = await self._call_litellm_raw(
                 messages,
                 model_name,
@@ -550,7 +724,7 @@ class LLMBackend:
                 top_p=top_p,
                 max_tokens=max_tokens
             )
-
+            self._notify_activity() 
             if not raw_text:
                 return LLMResponse(error="Empty response from LLM", thought=reasoning)
 
@@ -560,6 +734,77 @@ class LLMBackend:
         except Exception as e:
             self._log_interaction("EXCEPTION", str(e))
             return LLMResponse(error=str(e))
+
+    async def query_raw(
+        self,
+        messages: list,
+        temperature: float = 0.7,
+        top_p: float = 1.0,
+        max_tokens: int = 500,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None
+    ) -> Dict[str, Any]:
+        llm_cfg = self.config.get_llm_config()
+        self._notify_activity()
+        _, raw_text, reasoning, tool_calls = await self._call_litellm_raw(
+            messages,
+            llm_cfg["model_name"],
+            llm_cfg["model_type"],
+            llm_cfg["api_key"],
+            llm_cfg.get("base_url", ""),
+            tools=tools,
+            tool_choice=tool_choice,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens
+        )
+        self._notify_activity()
+        return {
+            "raw_text": raw_text,
+            "reasoning": reasoning,
+            "tool_calls": tool_calls
+        }
+
+    def _prune_mcp_messages(self, messages: List[Dict[str, Any]], pattern: str) -> List[Dict[str, Any]]:
+        """Generic pruning of tool messages based on a regex pattern.
+        """
+        if not pattern:
+            return messages
+            
+        groups: List[List[int]] = []
+        
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                tool_calls = msg["tool_calls"]
+                matches = any(re.match(pattern, tc.get("function", {}).get("name", "")) for tc in tool_calls)
+                
+                if matches:
+                    group = [i]
+                    j = i + 1
+                    while j < len(messages) and messages[j].get("role") == "tool":
+                        group.append(j)
+                        j += 1
+                    groups.append(group)
+                    i = j
+                    continue
+            i += 1
+        
+        if len(groups) <= 1:
+            return messages
+            
+        indices_to_remove = set()
+        for group in groups[:-1]:
+            for idx in group:
+                indices_to_remove.add(idx)
+        
+        if not indices_to_remove:
+            return messages
+            
+        new_messages = [msg for i, msg in enumerate(messages) if i not in indices_to_remove]
+        log(f"[LLM] Pruned {len(indices_to_remove)} old messages from context using pattern '{pattern}'.")
+        return new_messages
 
     async def _query_with_tools(
         self,
@@ -573,12 +818,30 @@ class LLMBackend:
         temperature: float = 0.7,
         top_p: float = 1.0,
         max_tokens: int = 500,
-        pack_id: Optional[str] = None
+        pack_id: Optional[str] = None,
+        original_question: str = ""
     ) -> LLMResponse:
         attempted_retry = False
         if max_tool_rounds <= 0:
             return LLMResponse(error="Tool call exceeded max rounds")
+            
         for _ in range(max_tool_rounds):
+            if len(messages) > 10:
+                prefixes = {}
+                for msg in messages:
+                    if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                        for tc in msg["tool_calls"]:
+                            name = tc.get("function", {}).get("name", "")
+                            p = name.split("_")[0] if "_" in name else ""
+                            if p: prefixes[p] = prefixes.get(p, 0) + 1
+                
+                if prefixes:
+                    top_prefix = max(prefixes, key=prefixes.get)
+                    
+                    pattern = f"^{top_prefix}_(?!get_manual).*"
+                    messages = self._prune_mcp_messages(messages, pattern)
+            
+            self._notify_activity()
             _, raw_text, reasoning, tool_calls = await self._call_litellm_raw(
                 messages,
                 model_name,
@@ -591,6 +854,7 @@ class LLMBackend:
                 top_p=top_p,
                 max_tokens=max_tokens
             )
+            self._notify_activity() 
 
             if tool_calls:
                 serializable_tool_calls = []
@@ -610,6 +874,7 @@ class LLMBackend:
                     if not name:
                         messages.append({"role": "tool", "content": "Tool call missing name.", "tool_call_id": call_id or ""})
                         continue
+                    tool_meta = self._mcp_manager.get_tool_metadata(name) if self._mcp_manager else {}
                     parsed_args: Dict[str, Any] = {}
                     if isinstance(arguments, str):
                         if arguments.strip():
@@ -624,14 +889,22 @@ class LLMBackend:
                         parsed_args["pack_id"] = pack_id
 
                     try:
-                        tool_result = await self._mcp_manager.call_tool(name, parsed_args)
+                        self._notify_activity()
+                        if tool_meta.get("subagent"):
+                            log(f"[LLM] Delegating '{name}' to SubAgent with question: {original_question}")
+                            tool_result = await self._run_subagent(name, original_question, pack_id)
+                            log(f"[LLM] SubAgent '{name}' finished. Result summary: {tool_result[:200]}...")
+                        else:
+                            tool_result = await self._mcp_manager.call_tool(name, parsed_args)
+                        self._notify_activity()
                     except Exception as e:
                         tool_result = f"Tool error: {e}"
                     
                     if not isinstance(tool_result, str):
                         tool_result = str(tool_result)
                     
-                    log(f"[LLM] Called tool {name}, result: {tool_result}")
+                    if not tool_meta.get("subagent"):
+                        log(f"[LLM] Called tool {name}, result: {tool_result}")
                         
                     messages.append({"role": "tool", "content": tool_result, "tool_call_id": call_id or ""})
                 continue
@@ -688,7 +961,7 @@ class LLMBackend:
                     except Exception:
                         image_base64 = None
 
-            openai_compatible = model_type == "local" or model_type in [1, 2, 4, 6, 7, 8, 9]
+            openai_compatible = model_type == "local" or model_type in [1, 2, 4, 6, 7, 8, 9, 10]
             image_capable = openai_compatible or model_type in [3, 5]
             if image_base64 and image_capable:
                 messages = self._build_messages_with_image(question, extra_context or ocr_context, image_base64, history, pack_id=pack_id, source=source)
@@ -698,7 +971,7 @@ class LLMBackend:
             tools: List[Dict[str, Any]] = []
             max_tool_rounds = 0
             if source == "desktop" and self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
-                tools = self._mcp_manager.get_tools()
+                tools = self._mcp_manager.get_tools(public_only=True)
                 max_tool_rounds = max(self._mcp_manager.max_tool_rounds, 0)
             prompt_parts = []
             if self.config.enable_time_context:
@@ -718,10 +991,8 @@ class LLMBackend:
             target_history = history if history is not None else self.history
             if target_history.get_messages():
                 prompt_parts.append("history")
-            parts_text = ", ".join(prompt_parts) if prompt_parts else "base"
-            print(f"[LLM] Prompt built. Parts: {parts_text}")
 
-            supported_types = {"local", 1, 2, 3, 4, 5, 6, 7, 8, 9}
+            supported_types = {"local", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
             if model_type in supported_types:
                 if tools:
                     response = await self._query_with_tools(
@@ -735,7 +1006,8 @@ class LLMBackend:
                         temperature=llm_config.get("temperature", 0.7),
                         top_p=llm_config.get("top_p", 1.0),
                         max_tokens=llm_config.get("max_tokens", 500),
-                        pack_id=pack_id
+                        pack_id=pack_id,
+                        original_question=question
                     )
                 else:
                     response = await self._query_litellm(
