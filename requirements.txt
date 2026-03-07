@@ -26,3 +26,4 @@ PyYAML>=6.0.1
 tencentcloud-sdk-python-common>=3.0.0
 tencentcloud-sdk-python-ocr>=3.0.0
 mcp>=1.0.0
+websockets==15.0.1
