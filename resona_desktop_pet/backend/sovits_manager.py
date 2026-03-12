@@ -93,36 +93,39 @@ class SoVITSManager:
                 print(f"[SoVITS] Warning: Pack ID '{pack_id}' not found in any directory.")
                 
         pack_model_dir = pack_dir / "models" / "sovits"
-        if self.device == "cuda":
-            try:
-                override_path = self.project_root / "TEMP" / f"tts_infer_override_{pack_id}.yaml"
-                override_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self.config_file, "r", encoding="utf-8") as f: content = f.read()
+        try:
+            override_path = self.project_root / "TEMP" / f"tts_infer_override_{pack_id}.yaml"
+            override_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.config_file, "r", encoding="utf-8") as f: content = f.read()
+            if self.device == "cuda":
                 content = content.replace("device: cpu", "device: cuda")
                 content = content.replace("is_half: false", "is_half: true")
-                bert_abs = (self.gpt_sovits_dir / "GPT_SoVITS" / "pretrained_models" / "chinese-roberta-wwm-ext-large").absolute().as_posix()
-                hubert_abs = (self.gpt_sovits_dir / "GPT_SoVITS" / "pretrained_models" / "chinese-hubert-base").absolute().as_posix()
-                content = re.sub(r'bert_base_path:.*', f'bert_base_path: {bert_abs}', content)
-                content = re.sub(r'cnhuhbert_base_path:.*', f'cnhuhbert_base_path: {hubert_abs}', content)
-                content = re.sub(r'cnhubert_base_path:.*', f'cnhubert_base_path: {hubert_abs}', content)
-                ckpt_files = list(pack_model_dir.glob("*.ckpt"))
-                pth_files = list(pack_model_dir.glob("*.pth"))
-                if not (ckpt_files and pth_files):
-                    model_dir = self.project_root / "models" / "sovits"
-                    ckpt_files = list(model_dir.glob("*.ckpt"))
-                    pth_files = list(model_dir.glob("*.pth"))
-                if ckpt_files and pth_files:
-                    ckpt_file, pth_file = sorted(ckpt_files)[0], sorted(pth_files)[0]
-                    abs_ckpt = ckpt_file.absolute().as_posix()
-                    abs_pth = pth_file.absolute().as_posix()
-                    content = re.sub(r't2s_weights_path:.*', f't2s_weights_path: "{abs_ckpt}"', content)
-                    content = re.sub(r'vits_weights_path:.*', f'vits_weights_path: "{abs_pth}"', content)
-                    content = re.sub(r'version:.*', f'version: {self.model_version}', content)
-                with open(override_path, "w", encoding="utf-8") as f: f.write(content)
-                actual_config_file = override_path
-                print(f"[SoVITS] Applied CUDA config override: {actual_config_file}")
-            except Exception as e:
-                print(f"[SoVITS] Warning: Failed to apply CUDA config override: {e}")
+            else:
+                content = content.replace("device: cuda", "device: cpu")
+                content = content.replace("is_half: true", "is_half: false")
+            bert_abs = (self.gpt_sovits_dir / "GPT_SoVITS" / "pretrained_models" / "chinese-roberta-wwm-ext-large").absolute().as_posix()
+            hubert_abs = (self.gpt_sovits_dir / "GPT_SoVITS" / "pretrained_models" / "chinese-hubert-base").absolute().as_posix()
+            content = re.sub(r'bert_base_path:.*', f'bert_base_path: {bert_abs}', content)
+            content = re.sub(r'cnhuhbert_base_path:.*', f'cnhuhbert_base_path: {hubert_abs}', content)
+            content = re.sub(r'cnhubert_base_path:.*', f'cnhubert_base_path: {hubert_abs}', content)
+            ckpt_files = list(pack_model_dir.glob("*.ckpt"))
+            pth_files = list(pack_model_dir.glob("*.pth"))
+            if not (ckpt_files and pth_files):
+                model_dir = self.project_root / "models" / "sovits"
+                ckpt_files = list(model_dir.glob("*.ckpt"))
+                pth_files = list(model_dir.glob("*.pth"))
+            if ckpt_files and pth_files:
+                ckpt_file, pth_file = sorted(ckpt_files)[0], sorted(pth_files)[0]
+                abs_ckpt = ckpt_file.absolute().as_posix()
+                abs_pth = pth_file.absolute().as_posix()
+                content = re.sub(r't2s_weights_path:.*', f't2s_weights_path: "{abs_ckpt}"', content)
+                content = re.sub(r'vits_weights_path:.*', f'vits_weights_path: "{abs_pth}"', content)
+                content = re.sub(r'version:.*', f'version: {self.model_version}', content)
+            with open(override_path, "w", encoding="utf-8") as f: f.write(content)
+            actual_config_file = override_path
+            print(f"[SoVITS] Applied {self.device.upper()} config override: {actual_config_file}")
+        except Exception as e:
+            print(f"[SoVITS] Warning: Failed to apply config override: {e}")
         python_exec = sys.executable
         embedded_python = self.gpt_sovits_dir / "runtime" / "python.exe"
         if sys.platform == "win32" and embedded_python.exists(): python_exec = str(embedded_python)
