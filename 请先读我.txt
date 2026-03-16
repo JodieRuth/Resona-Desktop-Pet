@@ -12,4 +12,7 @@ Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 右键菜单没有powershell怎么办？
 通常来说这不太可能，除非你不是Windows。我无法保证在Windows以外的系统能运行。
 
+无论什么时候请不要关闭Powershell命令行窗口的运行。不管它卡住了多久。
+一般来说根据配置不同至少会在下载完之后卡在解压十几分钟到半小时不等，上不封顶。
+
 神秘特异小团体群号1021295370

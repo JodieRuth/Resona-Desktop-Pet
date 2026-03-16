@@ -581,6 +581,12 @@ class ApplicationController(QObject):
         self._pack_switch_wait_timer.timeout.connect(self._check_pack_switch_ready)
         self._pack_switch_pending = False
         self._pack_switch_deadline = 0.0
+        self._last_question_time = time.time()
+        self._idle_trigger_count = 0
+        self._idle_trigger_timer = QTimer()
+        self._idle_trigger_timer.timeout.connect(self._check_idle_trigger)
+        if self.config.idle_trigger_enabled:
+            self._idle_trigger_timer.start(1000)
         QTimer.singleShot(2000, self._check_startup_events)
         QTimer.singleShot(1000, self._init_hotkeys)
         QTimer.singleShot(500, self.main_window.manual_show)
@@ -960,6 +966,8 @@ class ApplicationController(QObject):
             return
             
         log(f"[Main] User query received: {text}")
+        self._last_question_time = time.time()
+        self._idle_trigger_count = 0
         self._current_watchdog_interval = 300000
         self._busy_watchdog.start(self._current_watchdog_interval)
         self.main_window.start_thinking()
@@ -1102,6 +1110,9 @@ class ApplicationController(QObject):
         if self.is_busy:
             return
 
+        if self.config.idle_trigger_enabled:
+            self._halve_idle_time()
+
         now = time.time()
         is_debug = self.config.debug_trigger
         if is_debug:
@@ -1127,6 +1138,57 @@ class ApplicationController(QObject):
             trigger = self._pending_triggers.pop(0)
             self._trigger_cooldown_end = now + self.config.trigger_cooldown
             self._execute_actions_chain(trigger)
+
+    def _check_idle_trigger(self):
+        if not self.config.idle_trigger_enabled:
+            return
+        if self.is_busy:
+            return
+        now = time.time()
+        elapsed = now - self._last_question_time
+        start_delay = self.config.idle_trigger_start_delay
+        if elapsed < start_delay:
+            return
+        probability = self.config.idle_trigger_probability
+        min_triggers = self.config.idle_trigger_min_triggers
+        adjusted_elapsed = elapsed - start_delay
+        seconds_passed = int(adjusted_elapsed)
+        if seconds_passed <= 0:
+            return
+        expected_triggers = seconds_passed * probability
+        if self._idle_trigger_count < min_triggers:
+            if random.random() < probability or self._idle_trigger_count < seconds_passed * probability:
+                self._trigger_idle_question()
+        else:
+            if random.random() < probability:
+                self._trigger_idle_question()
+
+    def _trigger_idle_question(self):
+        if self.is_busy:
+            return
+        self._idle_trigger_count += 1
+        log(f"[Main] Idle trigger activated (count: {self._idle_trigger_count})")
+        prompt = self.config.idle_trigger_prompt
+        self._last_question_time = time.time()
+        self.main_window.start_thinking()
+        asyncio.run_coroutine_threadsafe(self._query_llm_idle(prompt), self._loop)
+
+    async def _query_llm_idle(self, prompt: str):
+        get_llm_logger()
+        try:
+            response = await self.llm_backend.query_idle(prompt, pack_id=self.config.pack_manager.active_pack_id)
+            self.llm_response_ready.emit(response)
+        except Exception as e:
+            log(f"[Main] Idle LLM query failed: {e}")
+            from resona_desktop_pet.backend.llm_backend import LLMResponse
+            self.llm_response_ready.emit(LLMResponse(error=str(e)))
+
+    def _halve_idle_time(self):
+        elapsed = time.time() - self._last_question_time
+        halved = elapsed / 2
+        self._last_question_time = time.time() - halved
+        log(f"[Main] Idle time halved: {elapsed:.1f}s -> {halved:.1f}s (remaining)")
+
     def _cancel_action_chain(self):
         self._chain_cancelled = True
         self._is_chain_executing = False

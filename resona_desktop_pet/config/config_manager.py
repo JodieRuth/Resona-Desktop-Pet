@@ -205,6 +205,27 @@ class ConfigManager:
         return self.getfloat("General", "idle_fade_delay", 3.0)
 
     @property
+    def idle_trigger_enabled(self) -> bool:
+        return self.getboolean("IdleTrigger", "enabled", False)
+
+    @property
+    def idle_trigger_start_delay(self) -> float:
+        return self.getfloat("IdleTrigger", "start_delay", 1200.0)
+
+    @property
+    def idle_trigger_probability(self) -> float:
+        val = self.getfloat("IdleTrigger", "probability", 0.01)
+        return max(0.0, min(1.0, val))
+
+    @property
+    def idle_trigger_min_triggers(self) -> int:
+        return self.getint("IdleTrigger", "min_triggers", 3)
+
+    @property
+    def idle_trigger_prompt(self) -> str:
+        return self.get("IdleTrigger", "prompt", "The user has been idle for a while. Say something brief to check on them or start a casual conversation.")
+
+    @property
     def text_read_speed(self) -> float:
         return self.getfloat("General", "text_read_speed", 0.2)
 

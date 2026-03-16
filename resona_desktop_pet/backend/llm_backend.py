@@ -319,12 +319,13 @@ class LLMBackend:
         messages.append({"role": "system", "content": system_prompt})
 
         question_blocks = []
-        if source and source != "desktop":
+        if source and source != "desktop" and source != "idle_trigger":
             question_blocks.append(f"[Request Source: {source}]")
 
-        sentence_limit = self.config.ocr_sentence_limit
-        if sentence_limit > 0:
-            question_blocks.append(f"Note: Keep your response under {sentence_limit} sentences and maintain your persona.")
+        if source != "idle_trigger":
+            sentence_limit = self.config.ocr_sentence_limit
+            if sentence_limit > 0:
+                question_blocks.append(f"Note: Keep your response under {sentence_limit} sentences and maintain your persona.")
         question_blocks.append(question)
         processed_question = "\n".join(question_blocks)
 
@@ -1029,6 +1030,44 @@ class LLMBackend:
             target_history = history if history is not None else self.history
             target_history.add("user", processed_question)
             target_history.add("assistant", response.raw_response)
+
+        return response
+
+    async def query_idle(self, question: str, pack_id: Optional[str] = None) -> LLMResponse:
+        llm_config = self.config.get_llm_config()
+        model_type = llm_config["model_type"]
+        model_name = llm_config["model_name"]
+        api_key = llm_config["api_key"]
+        base_url = llm_config.get("base_url", "")
+        
+        current_signature = (model_type, model_name, api_key, base_url)
+        if current_signature != self._active_model_signature:
+            self.reconnect()
+
+        try:
+            messages = self._build_messages(question, extra_context=None, history=None, pack_id=pack_id, source="idle_trigger")
+            processed_question = self._extract_text_content(messages[-1]["content"])
+
+            supported_types = {"local", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+            if model_type in supported_types:
+                response = await self._query_litellm(
+                    messages,
+                    model_name,
+                    model_type,
+                    api_key,
+                    base_url,
+                    temperature=llm_config.get("temperature", 0.7),
+                    top_p=llm_config.get("top_p", 1.0),
+                    max_tokens=llm_config.get("max_tokens", 500)
+                )
+            else:
+                response = LLMResponse(error=f"Unsupported model type: {model_type}")
+        except Exception as e:
+            response = LLMResponse(error=f"Request Failed: {e}")
+
+        if not response.error and response.text_display:
+            self.history.add("user", "Automatic idle trigger")
+            self.history.add("assistant", response.text_display)
 
         return response
 

@@ -4,6 +4,8 @@ import sys
 import logging
 import psutil
 import subprocess
+import threading
+import os
 from typing import Callable, List, Set
 
 logger = logging.getLogger("Cleanup")
@@ -48,6 +50,16 @@ class CleanupManager:
             return
         self._is_cleaning_up = True
         logger.info("Starting cleanup...")
+        
+        def _force_exit_watchdog():
+            import time
+            time.sleep(2)
+            logger.warning("Cleanup timeout (2s), forcing exit...")
+            os._exit(0)
+        
+        watchdog = threading.Thread(target=_force_exit_watchdog, daemon=True)
+        watchdog.start()
+        
         for callback in reversed(self._cleanup_callbacks):
             try:
                 callback()
