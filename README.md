@@ -95,6 +95,7 @@
    - 打开 `config.cfg`，填入您的大语言模型 API Key。也可以使用本地部署的大语言模型。
 4. **配置 SoVITS**:
    - 从https://github.com/RVC-Boss/GPT-SoVITS/releases/tag/20250606v2pro 获取SoVITS的整合包，解压到GPT-SoVITS目录下，确保你的路径看起来像这样："ResonaDesktopPet\GPT-SoVITS\GPT-SoVITS-v2pro-20250604\api_v2.py"。你也可以使用任何你喜欢的形式，只要它存在一个api_v2.py并且能够被程序正常调用。
+   - 或者运行任何一个.ps1安装脚本。文档更新非常不及时很可能有严重滞后的信息，我为我的懒惰深表抱歉。
    - 程序在启动时，如果SoVITS启用，会从这里启动一个SoVITS服务器用于实时合成语音。
 5. **启动程序**：
    - 双击 `run.bat` 即可开始与您的桌面宠物互动。
