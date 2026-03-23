@@ -4,6 +4,7 @@ import asyncio
 import base64
 import io
 import logging
+import sys
 from datetime import datetime
 from typing import Optional, Callable, Any, List, Dict, Tuple
 from pathlib import Path
@@ -11,11 +12,24 @@ from dataclasses import dataclass, field
 
 import requests
 import psutil
-import win32con
-import win32gui
-import win32api
-import win32process
-from PIL import ImageGrab
+if sys.platform == "win32":
+    import win32con
+    import win32gui
+    import win32api
+    import win32process
+    from PIL import ImageGrab
+else:
+    try:
+        import mss
+        _MSS_AVAILABLE = True
+    except ImportError:
+        _MSS_AVAILABLE = False
+    try:
+        from ewmh import EWMH
+        from Xlib import display
+        _XLIB_AVAILABLE = True
+    except ImportError:
+        _XLIB_AVAILABLE = False
 from litellm import acompletion
 
 from ..config import ConfigManager
@@ -409,36 +423,81 @@ class LLMBackend:
         return raw_text, reasoning
 
     def _get_visible_processes_on_active_monitor(self) -> list:
-        hwnd = win32gui.GetForegroundWindow()
-        if not hwnd:
-            return []
-        active_monitor = win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTONEAREST)
-        results = []
+        if sys.platform == "win32":
+            hwnd = win32gui.GetForegroundWindow()
+            if not hwnd:
+                return []
+            active_monitor = win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTONEAREST)
+            results = []
 
-        def enum_callback(handle, acc):
-            if not win32gui.IsWindowVisible(handle):
-                return
-            title = win32gui.GetWindowText(handle)
-            if not title:
-                return
-            monitor = win32api.MonitorFromWindow(handle, win32con.MONITOR_DEFAULTTONULL)
-            if monitor != active_monitor:
-                return
-            _, pid = win32process.GetWindowThreadProcessId(handle)
+            def enum_callback(handle, acc):
+                if not win32gui.IsWindowVisible(handle):
+                    return
+                title = win32gui.GetWindowText(handle)
+                if not title:
+                    return
+                monitor = win32api.MonitorFromWindow(handle, win32con.MONITOR_DEFAULTTONULL)
+                if monitor != active_monitor:
+                    return
+                _, pid = win32process.GetWindowThreadProcessId(handle)
+                try:
+                    proc_name = psutil.Process(pid).name()
+                except Exception:
+                    proc_name = "unknown"
+                acc.append(f"{proc_name} | {title}")
+
+            win32gui.EnumWindows(enum_callback, results)
+            return sorted(set(results))
+        else:
+            if not getattr(self, '_XLIB_AVAILABLE', False):
+                return []
             try:
-                proc_name = psutil.Process(pid).name()
+                ewmh = EWMH()
+                active = ewmh.getActiveWindow()
+                if active:
+                    pid = ewmh.getWmPid(active)
+                    name = ewmh.getWmName(active)
+                    if isinstance(name, bytes):
+                        name = name.decode('utf-8', errors='ignore')
+                    return [f"{name} | {name}"] if name else []
+                return []
             except Exception:
-                proc_name = "unknown"
-            acc.append(f"{proc_name} | {title}")
-
-        win32gui.EnumWindows(enum_callback, results)
-        return sorted(set(results))
+                return []
 
     def _prepare_image_base64(self) -> str:
-        screenshot = ImageGrab.grab()
-        img_byte_arr = io.BytesIO()
-        screenshot.save(img_byte_arr, format="PNG")
-        return base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
+        if sys.platform == "win32":
+            screenshot = ImageGrab.grab()
+            img_byte_arr = io.BytesIO()
+            screenshot.save(img_byte_arr, format="PNG")
+            return base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
+        else:
+            if getattr(self, '_MSS_AVAILABLE', False):
+                import mss
+                from PIL import Image
+                with mss.mss() as sct:
+                    monitor = sct.monitors[1]  
+                    screenshot = sct.grab(monitor)
+                    img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
+                    img_byte_arr = io.BytesIO()
+                    img.save(img_byte_arr, format="PNG")
+                    return base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
+            else:
+                import subprocess
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                    tmp_path = tmp.name
+                try:
+                    subprocess.run(["scrot", "-o", tmp_path], check=True, capture_output=True)
+                    from PIL import Image
+                    screenshot = Image.open(tmp_path)
+                    img_byte_arr = io.BytesIO()
+                    screenshot.save(img_byte_arr, format="PNG")
+                    result = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
+                finally:
+                    import os
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                return result
 
     def _baidu_ocr(self, image_base64: str, api_key: str, secret_key: str) -> str:
         session = requests.Session()

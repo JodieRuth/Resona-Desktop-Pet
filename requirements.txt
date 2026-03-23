@@ -12,10 +12,10 @@ sherpa-onnx>=1.10.0
 pyaudio>=0.2.14
 keyboard>=0.13.5
 numpy>=1.26.0,<2.0.0
-pywin32>=306
+pywin32>=306; sys_platform == 'win32'
 pynvml>=11.5.0
 GPUtil>=1.4.0
-uiautomation>=2.0.0
+uiautomation>=2.0.0; sys_platform == 'win32'
 pyperclip>=1.8.2
 fastapi>=0.100.0
 uvicorn>=0.20.0
@@ -27,3 +27,7 @@ tencentcloud-sdk-python-common>=3.0.0
 tencentcloud-sdk-python-ocr>=3.0.0
 mcp>=1.0.0
 websockets==15.0.1
+
+python-xlib; sys_platform == 'linux'
+ewmh; sys_platform == 'linux'
+mss; sys_platform == 'linux'

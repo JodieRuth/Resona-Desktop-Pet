@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import asyncio
 import aiohttp
 import traceback
@@ -173,8 +174,8 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                             TARGET_SR = 44100
                             if info.subtype != "PCM_16" or sr != TARGET_SR:
                                 pcm_path = output_path.replace(".wav", "_pcm16.wav")
-                                # 优先用项目本地 ffmpeg，找不到再用系统 PATH
-                                ffmpeg_local = self.project_root / "ffmpeg" / "bin" / "ffmpeg.exe"
+                                ffmpeg_exe = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+                                ffmpeg_local = self.project_root / "ffmpeg" / "bin" / ffmpeg_exe
                                 ffmpeg_cmd = str(ffmpeg_local) if ffmpeg_local.exists() else "ffmpeg"
                                 result = subprocess.run([
                                     ffmpeg_cmd, "-y", "-i", output_path,

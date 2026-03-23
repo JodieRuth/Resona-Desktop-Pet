@@ -40,7 +40,6 @@ class BehaviorMonitor(QThread):
         self.load_triggers()
 
     def on_file_dropped(self, file_info: dict):
-        """处理UI层发出的文件拖入信号"""
         self.dropped_file_cache = file_info
         logging.info(f"[Behavior] 文件拖入: name={file_info.get('name')}, ext={file_info.get('ext')}")
 
@@ -221,7 +220,7 @@ class BehaviorMonitor(QThread):
             if "logic" in c:
                 res = self._check_recursive_logic(c, win, idle, recovery, hw, ui, clip, weather, rid, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=mock_uptime, mock_battery=mock_battery, mock_file_drop=mock_file_drop, c_path=c_path)
             else:
-                res, _ = self._test_single_condition_v6(c, win, idle, recovery, hw, ui, clip, weather, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=mock_uptime, mock_battery=mock_battery, mock_file_drop=mock_file_drop)
+                res, _ = self._evaluate_condition(c, win, idle, recovery, hw, ui, clip, weather, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=mock_uptime, mock_battery=mock_battery, mock_file_drop=mock_file_drop)
             if logic == "CUMULATIVE":
                 if res: self.rule_hit_states.setdefault(rid, {})[c_path] = True
                 results.append(self.rule_hit_states.get(rid, {}).get(c_path, False))
@@ -231,7 +230,7 @@ class BehaviorMonitor(QThread):
         if logic == "OR": return any(results)
         if logic == "CUMULATIVE": return all(results)
         return False
-    def _test_single_condition_v6(self, c, win, idle, recovery, hw, ui, clip, weather, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=None, mock_battery=None, mock_file_drop=None):
+    def _evaluate_condition(self, c, win, idle, recovery, hw, ui, clip, weather, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=None, mock_battery=None, mock_file_drop=None):
         t = c.get("type")
         res, pids = False, []
         is_debug = mock_uptime is not None
@@ -457,11 +456,10 @@ class BehaviorMonitor(QThread):
             if self.config.use_ui_automation and pname in ["chrome.exe", "msedge.exe"]:
                 try:
                     import uiautomation as auto
-                    # Redirect uiautomation logs to the main logger
+                    
                     auto.Logger.LogToConsole = False
                     auto.Logger.LogToFile = False
                     
-                    # Custom handler to redirect to main logger
                     if not getattr(auto.Logger, "_redirected", False):
                         def _log_redirect(msg, color=None, writeToFile=False):
                             if msg:

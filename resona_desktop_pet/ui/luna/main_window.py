@@ -10,7 +10,10 @@ from PySide6.QtCore import Qt, QTimer, Signal, QEvent, QPoint, QRect, QPropertyA
 from PySide6.QtGui import QMouseEvent, QWheelEvent, QPixmap, QCursor, QGuiApplication, QAction, QActionGroup, QIcon
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QMenu, QGraphicsOpacityEffect, QApplication
 from resona_desktop_pet.config import ConfigManager
-from resona_desktop_pet.physics import PhysicsBridge
+if sys.platform == "win32":
+    from resona_desktop_pet.physics import PhysicsBridge
+else:
+    PhysicsBridge = None
 from .character_view import CharacterView
 from .io_overlay import IOOverlay
 
@@ -131,7 +134,7 @@ class MainWindow(QWidget):
 
         # Physics
         self.physics_bridge = None
-        if self.config.physics_enabled:
+        if self.config.physics_enabled and sys.platform == "win32":
             self.physics_bridge = PhysicsBridge(self, self.config)
 
         self.setAcceptDrops(True)
@@ -372,45 +375,54 @@ class MainWindow(QWidget):
     def _reinforce_topmost(self):
         if self.manual_hidden or self.fullscreen_hidden or not self.isVisible():
             return
-        if self.config.always_on_top and sys.platform == "win32":
-            try:
+        if self.config.always_on_top:
+            if sys.platform == "win32":
+                try:
+                    if not (self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint):
+                        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+                        self.show()
+                        self.raise_()
+                    hwnd = self.winId()
+                    if not isinstance(hwnd, int):
+                        hwnd = int(hwnd)
+                    ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040)
+                except:
+                    pass
+            else:
                 if not (self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint):
                     self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
                     self.show()
                     self.raise_()
-                hwnd = self.winId()
-                if not isinstance(hwnd, int):
-                    hwnd = int(hwnd)
-                ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040)
-            except:
-                pass
 
     def _apply_window_settings(self):
-        flags = Qt.WindowType.FramelessWindowHint
+        flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
         if self.config.always_on_top:
             flags |= Qt.WindowType.WindowStaysOnTopHint
-        
+
         current_flags = self.windowFlags()
         if flags != current_flags:
+            was_visible = self.isVisible()
             self.setWindowFlags(flags)
-            if self.isVisible():
+            if was_visible:
                 super().show()
                 self._reinforce_topmost()
                 self.sync_window_to_sprite()
-        
+
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DropSiteRegistered, True)
-        
+
         if not hasattr(self, '_drag_drop_initialized'):
             self.setAcceptDrops(True)
             self.character.setAcceptDrops(True)
             self.io.setAcceptDrops(True)
             self._drag_drop_initialized = True
-        
+
         if not self.isVisible() and not self.manual_hidden:
             self.show()
             self.raise_()
             self._reinforce_topmost()
+            if sys.platform != "win32":
+                QTimer.singleShot(100, self._linux_show_fix)
         elif self.isVisible():
             self.raise_()
             self._reinforce_topmost()
@@ -419,6 +431,13 @@ class MainWindow(QWidget):
                     self.topmost_timer.start()
             else:
                 self.topmost_timer.stop()
+
+    def _linux_show_fix(self):
+        if sys.platform != "win32" and not self.manual_hidden and not self.fullscreen_hidden:
+            if not self.isVisible():
+                self.show()
+                self.raise_()
+                self._reinforce_topmost()
 
     def _reapply_drag_drop(self):
         self.setAcceptDrops(True)
@@ -443,7 +462,7 @@ class MainWindow(QWidget):
             if self.physics_bridge:
                 self.physics_bridge.set_enabled(False)
                 self.physics_bridge = None
-            if self.config.physics_enabled:
+            if self.config.physics_enabled and sys.platform == "win32":
                 self.physics_bridge = PhysicsBridge(self, self.config)
             self.physics_pause_until_next_drag = False
             self.physics_pause_after_drag = False

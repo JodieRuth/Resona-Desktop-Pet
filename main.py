@@ -23,7 +23,10 @@ from resona_desktop_pet.backend.sovits_manager import SoVITSManager
 from resona_desktop_pet.ui.luna.main_window import MainWindow
 from resona_desktop_pet.ui.tray_icon import TrayIcon
 from resona_desktop_pet.cleanup_manager import cleanup_manager
-from resona_desktop_pet.behavior_monitor import BehaviorMonitor
+if sys.platform == "win32":
+    from resona_desktop_pet.behavior_monitor import BehaviorMonitor
+else:
+    BehaviorMonitor = None
 from resona_desktop_pet.web_server import WebServerThread, session_manager, ClientSession
 log_dir = project_root / "logs"
 log_dir.mkdir(exist_ok=True)
@@ -546,11 +549,18 @@ class ApplicationController(QObject):
                 log(f"[Main] Failed to initialize DebugPanel: {e}")
 
         self.main_window.stats["total_clicks"] = self.state.get("total_clicks", 0)
-        self.behavior_monitor = BehaviorMonitor(self.config, self)
-        self.behavior_monitor.fullscreen_status_changed.connect(self._handle_fullscreen_status)
-        self.behavior_monitor.trigger_matched.connect(self._handle_behavior_trigger)
-        self.main_window.file_dropped.connect(self.behavior_monitor.on_file_dropped)
-        self.behavior_monitor.start()
+        
+        self._is_windows = sys.platform == "win32"
+        
+        if self._is_windows:
+            self.behavior_monitor = BehaviorMonitor(self.config, self)
+            self.behavior_monitor.fullscreen_status_changed.connect(self._handle_fullscreen_status)
+            self.behavior_monitor.trigger_matched.connect(self._handle_behavior_trigger)
+            self.main_window.file_dropped.connect(self.behavior_monitor.on_file_dropped)
+            self.behavior_monitor.start()
+        else:
+            self.behavior_monitor = None
+            log("[Main] BehaviorMonitor disabled on non-Windows platform")
         self._mocker_process = None
         if self.config.debug_trigger:
             import subprocess
@@ -1433,7 +1443,8 @@ class ApplicationController(QObject):
         log("[PackSwitch] Reloading backends")
         self.tts_backend.reload_config()
         self.llm_backend.history.clear()
-        self.behavior_monitor.load_triggers()
+        if self.behavior_monitor:
+            self.behavior_monitor.load_triggers()
 
         self._pack_switch_pending = True
         self._pack_switch_deadline = time.time() + 75
@@ -1610,7 +1621,8 @@ class ApplicationController(QObject):
     def _on_settings_saved(self):
         log("[Main] Config updated via settings dialog.")
         self.config.load()
-        self.behavior_monitor.load_triggers()
+        if self.behavior_monitor:
+            self.behavior_monitor.load_triggers()
         if hasattr(self, "timer_scheduler"):
             self.timer_scheduler.refresh_config()
         if self.main_window:
@@ -1690,13 +1702,24 @@ class ApplicationController(QObject):
                 json.dump(self.state, f, indent=4, ensure_ascii=False)
         except: pass
 def is_admin():
-    try: return ctypes.windll.shell32.IsUserAnAdmin()
-    except: return False
+    if sys.platform == "win32":
+        try: return ctypes.windll.shell32.IsUserAnAdmin()
+        except: return False
+    else:
+        import os
+        return os.geteuid() == 0
 def run_as_admin():
     args = sys.argv[:]
     if "--log-file" not in args:
         args.extend(["--log-file", str(log_file)])
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(args), str(project_root), 1)
+    
+    if sys.platform == "win32":
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(args), str(project_root), 1)
+    else:
+        try:
+            os.execvp("pkexec", ["pkexec", sys.executable] + args)
+        except FileNotFoundError:
+            os.execvp("sudo", ["sudo", sys.executable] + args)
 
 def main():
     import argparse
@@ -1718,21 +1741,22 @@ def main():
 
     config = ConfigManager(str(project_root / "config.cfg"))
     needs_admin = False
-    trigger_path = config.pack_manager.get_path("logic", "triggers")
-    if trigger_path and trigger_path.exists():
-        try:
-            with open(trigger_path, "r", encoding="utf-8") as f:
-                triggers = json.load(f)
-                def check_sensitive(node):
-                    if isinstance(node, dict):
-                        if node.get('type') in ['cpu_temp', 'gpu_temp', 'url_match']: return True
-                        for c in node.get('conditions', []):
-                            if check_sensitive(c): return True
-                    return False
-                for rule in triggers:
-                    if check_sensitive(rule): needs_admin = True; break
-        except: pass
-    if needs_admin and sys.platform == 'win32' and not is_admin():
+    if sys.platform == "win32":
+        trigger_path = config.pack_manager.get_path("logic", "triggers")
+        if trigger_path and trigger_path.exists():
+            try:
+                with open(trigger_path, "r", encoding="utf-8") as f:
+                    triggers = json.load(f)
+                    def check_sensitive(node):
+                        if isinstance(node, dict):
+                            if node.get('type') in ['cpu_temp', 'gpu_temp', 'url_match']: return True
+                            for c in node.get('conditions', []):
+                                if check_sensitive(c): return True
+                        return False
+                    for rule in triggers:
+                        if check_sensitive(rule): needs_admin = True; break
+            except: pass
+    if needs_admin and not is_admin():
         run_as_admin()
         sys.exit()
     app = QApplication(sys.argv)
