@@ -4,6 +4,7 @@ Located in `resona_desktop_pet/backend/`, these modules handle AI logic and audi
 
 ## 1. LLM Module (`llm_backend.py`)
 Handles communication with various LLM APIs.
+- **Unified Calling**: Based on the `litellm` library for unified LLM API calls, supporting 100+ models.
 - **History Management**: The `ConversationHistory` class automatically maintains the last N rounds of dialogue.
 - **Multi-Model Adapters**:
   - `query_openai_compatible`: Supports DeepSeek, GPT-4, LocalLLM, etc.
@@ -54,6 +55,13 @@ Located in `resona_desktop_pet/physics/`, providing experimental physics simulat
 - **Verlet Integration**: Uses Verlet algorithm to simulate particle motion trajectories.
 - **Collision Detection**: Detects screen edges (`ScreenBoundary`) and window rectangles for bounce effects.
 - **State Machine Integration**: Physics states (e.g., "Dragging", "Flying", "Landing") are decoupled but interoperable with the pet's main logic state machine.
+
+## 8. Timer Module (`timer_backend.py`)
+Responsible for scheduled task scheduling and management.
+- **Inbox Mechanism**: MCP tools write scheduled tasks to a JSON inbox, which the main program polls and reads.
+- **Task Queue**: Internally maintains a task queue, supporting persistence of unfinished tasks.
+- **Pre-synthesis Voice**: Can pre-synthesize voice before task trigger for zero-latency reminders.
+- **Configuration**: Configured through the `[Timer]` section in `config.cfg`.
 
 ---
 Parts of this document were generated with the assistance of large language models, and translations were also completed by large language models. Any deviations do not represent the author's true intent.

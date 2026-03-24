@@ -11,7 +11,7 @@ The `tools/` directory contains a suite of utilities to help you create and debu
   4. **Add Conditions**: E.g., CPU Temp > 80 or Mouse Hover > 5s.
   5. **Add Actions**: E.g., `speak` (voice response) or `move_to` (move character).
   6. Click "Save & Sync".
-- **Advanced**: Supports nested logic (AND/OR) for intelligent reactions.
+- **Advanced**: Supports nested logic (AND/OR/CUMULATIVE) for intelligent reactions.
 
 ## 2. Sensor Mocker (`sensor_mocker.py`)
 A powerful tool for debugging triggers.
@@ -27,12 +27,13 @@ A powerful tool for debugging triggers.
 - **How to Use**: Drag and drop images or folders onto the script.
 
 ## 4. Sprite Organizer (`sprite_organizer.py`)
-- **Purpose**: Batch renames loose sprite files into a standard format and generates the required `sum.json` based on assigned emotions.
+- **Purpose**: Graphically organize sprite files, batch rename them to standard format, and generate `sum.json` based on assigned emotions.
 - **How to Use**:
-  1. Open the folder containing your sprites.
-  2. Assign an emotion tag to each image.
-  3. Enter an Outfit ID.
-  4. Click generate; it will copy files to the correct pack directory and create the index.
+  1. Open `sprite_organizer.py`.
+  2. Select the folder containing your sprites.
+  3. Assign an emotion tag to each image.
+  4. Enter an Outfit ID and target resource pack.
+  5. Click generate; it will copy files to the correct pack directory and create the index.
 
 ## 5. MCP Toolset (`mcpserver/`)
 These scripts are not run directly but are loaded by the main program as MCP Servers for LLM invocation.

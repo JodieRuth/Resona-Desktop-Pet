@@ -73,9 +73,10 @@ To help you better understand and use this project, we have prepared detailed do
 ## 🛠️ Technical Architecture
 
 - **UI Framework**: PySide6 (Qt for Python, LGPL license)
-- **Language Models**: Supports OpenAI-compatible APIs and various mainstream cloud/local models.
+- **Language Models**: Supports OpenAI-compatible APIs and various mainstream cloud/local models via litellm library.
 - **Speech Recognition**: Fast offline recognition based on SenseVoice. Uses the default recording device; please ensure clear articulation without background noise.
 - **Speech Synthesis**: GPT-SoVITS inference engine.
+- **Physics Engine**: Custom Verlet integration physics engine (experimental).
 
 ## 🚀 Quick Start
 
@@ -105,26 +106,36 @@ This project includes several built-in tools for developers and resource pack cr
 
 This program has a plugin system that allows you to load external .py files from resource packs to customize trigger and action interactions for this program. Note: Only load plugins you trust.
 
+### What Plugins Can Do
+
+- Register custom trigger conditions (via `INFO["triggers"]`).
+- Register custom actions (via `INFO["actions"]`).
+- Execute custom logic in the background (via `check_status()`).
+- Call external APIs (such as weather, stock prices, etc.).
+
 ## ⚙️ Trigger System Explained
 
 Using `trigger_editor.py`, you can configure highly personalized reaction logic. Current capabilities include:
 
 ### 1. Conditions
-- **System Monitoring**: CPU/GPU temperature and usage, battery level (laptop).
+- **System Monitoring**: CPU/GPU temperature and usage, battery level (laptop, supports charging state detection).
 - **Software Detection**: Specific process in focus, specific process running in background, process uptime, specific URL visited (Chrome/Edge only), window title keyword matching.
-- **User Interaction**: Hover duration, pointer leave duration, long press duration, double-click/combo count, **file drop detection**.
-- **Environment Awareness**: Full-screen mode detection, weather matching, currently playing music (Netease Cloud Music only).
+- **User Interaction**: Hover duration, pointer leave duration, long press duration, click combo count, idle time detection, resume from idle, clipboard keyword matching.
+- **Physics Engine Related**: Physics acceleration threshold, bounce count, fall distance, window collision count.
+- **Environment Awareness**: Full-screen mode detection, weather matching, currently playing music (NetEase Cloud Music only).
 - **Time & Date**: Specific dates or time periods.
-- **Others**: Idle time detection, resume from idle, clipboard keyword matching.
-- **Logic Combinations**: Supports `AND`, `OR`, `CUMULATIVE`, and complex nested logic.
+- **Plugin Extension**: Custom trigger conditions registered by plugins.
+- **Logic Combinations**: Supports `AND` (all must be met), `OR` (any one is enough), `CUMULATIVE` (accumulate triggers), and complex nested logic.
 
 ### 2. Actions
 - **Speak** (`speak`): Plays specific voice lines with text and emotion tags.
 - **Delay** (`delay`): Inserts wait time between actions.
 - **Move To** (`move_to`): Moves the pet across the screen.
 - **Fade Out** (`fade_out`): Changes pet brightness or transparency.
-- **Random Group** (`random_group`): Randomly selects an action from a preset group (experimental).
-- **Lock Interaction** (`lock_intermation`): Temporarily disables all interactions (experimental).
+- **Random Group** (`random_group`): Randomly selects an action from a preset group.
+- **Lock Interaction** (`lock_interaction`): Temporarily disables/enables all interactions.
+- **Physics Engine Actions** (Experimental): `physics_add_directional_acceleration`, `physics_disable_temporarily`, `physics_multiply_forces`.
+- **Plugin Actions**: Custom actions registered by plugins.
 - **Exit App** (`exit_app`): Closes the program.
 
 ## ⚠️ Copyright & Licensing

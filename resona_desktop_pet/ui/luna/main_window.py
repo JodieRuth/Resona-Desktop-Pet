@@ -7,7 +7,7 @@ import threading
 import ctypes
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, Signal, QEvent, QPoint, QRect, QPropertyAnimation, QEasingCurve, QObject
-from PySide6.QtGui import QMouseEvent, QWheelEvent, QPixmap, QCursor, QGuiApplication, QAction, QActionGroup, QIcon
+from PySide6.QtGui import QMouseEvent, QWheelEvent, QPixmap, QCursor, QGuiApplication, QAction, QActionGroup, QIcon, QPainter, QPaintEvent
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QMenu, QGraphicsOpacityEffect, QApplication
 from resona_desktop_pet.config import ConfigManager
 if sys.platform == "win32":
@@ -395,7 +395,7 @@ class MainWindow(QWidget):
                     self.raise_()
 
     def _apply_window_settings(self):
-        flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
+        flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint | Qt.WindowType.Tool
         if self.config.always_on_top:
             flags |= Qt.WindowType.WindowStaysOnTopHint
 
@@ -410,6 +410,26 @@ class MainWindow(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DropSiteRegistered, True)
+
+        if sys.platform == "win32":
+            try:
+                hwnd = int(self.winId())
+                GWL_STYLE = -16
+                GWL_EXSTYLE = -20
+                WS_BORDER = 0x00800000
+                WS_CAPTION = 0x00C00000
+                WS_THICKFRAME = 0x00040000
+                WS_EX_CLIENTEDGE = 0x00000200
+                WS_EX_WINDOWEDGE = 0x00000100
+                style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
+                style &= ~(WS_BORDER | WS_CAPTION | WS_THICKFRAME)
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+                ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                ex_style &= ~(WS_EX_CLIENTEDGE | WS_EX_WINDOWEDGE)
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
+                ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020)
+            except Exception:
+                pass
 
         if not hasattr(self, '_drag_drop_initialized'):
             self.setAcceptDrops(True)
@@ -939,6 +959,13 @@ class MainWindow(QWidget):
             return
         QApplication.instance().quit()
         super().closeEvent(event)
+
+    def paintEvent(self, event: QPaintEvent):
+        painter = QPainter(self)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        painter.end()
+        super().paintEvent(event)
 
     def nativeEvent(self, event_type, message):
         if event_type == "windows_dispatcher_MSG":

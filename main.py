@@ -1759,6 +1759,11 @@ def main():
     if needs_admin and not is_admin():
         run_as_admin()
         sys.exit()
+
+    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     controller = ApplicationController(sovits_log_path=sovits_log_file)

@@ -7,7 +7,7 @@ aiohttp>=3.9.0
 tqdm>=4.66.0
 pillow>=10.0.0
 openai>=2.8.0
-litellm>=1.60.0
+litellm==1.81.9
 sherpa-onnx>=1.10.0
 pyaudio>=0.2.14
 keyboard>=0.13.5
