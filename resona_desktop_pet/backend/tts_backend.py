@@ -28,6 +28,14 @@ class TTSBackend:
         self._temp_dir.mkdir(exist_ok=True)
         self.api_url = f"http://127.0.0.1:{config.sovits_api_port}"
         self.timeout = aiohttp.ClientTimeout(total=config.sovits_timeout)
+        self._mode = config.sovits_mode
+        self._remote_handler = None
+        if self._mode == "server":
+            from .tts_remote_handler import RemoteTTSHandler
+            self._remote_handler = RemoteTTSHandler(config, self._temp_dir)
+            log(f"[TTS] Initialized in server mode: {config.sovits_server_host}:{config.sovits_server_port}")
+        else:
+            log(f"[TTS] Initialized in local mode")
     def _load_emotions_config(self, pack_id: Optional[str] = None) -> dict:
         target_pack = pack_id if pack_id else getattr(self.config.pack_manager, "active_pack_id", "")
         json_path = self.config.pack_manager.get_path("logic", "emotions", pack_id=target_pack)
@@ -98,19 +106,78 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
         except: pass
     async def load_model(self) -> bool:
         if not self.config.sovits_enabled: return False
+        if self._mode == "server":
+            return await self.ensure_connected()
         try:
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
                 async with session.get(self.api_url) as response:
                     return response.status in [200, 404, 405]
         except: return False
+
+    async def ensure_connected(self, pack_id: Optional[str] = None) -> bool:
+        if not self.config.sovits_enabled: return False
+        if self._mode != "server": return True
+        if not self._remote_handler: return False
+        target_pack = pack_id or self.config.pack_manager.get_pack_json_id()
+        return await self._remote_handler.ensure_connected(target_pack)
     async def synthesize(self, text: str, emotion: str = "<E:smile>", language: Optional[str] = None, pack_id: Optional[str] = None) -> TTSResult:
         if not self.config.sovits_enabled: return TTSResult(error="TTS is disabled")
         text = text.replace("\u30fb", " ")
-        
         log(f"[TTS] Synthesizing: {text[:30]}... ({emotion}) pack={pack_id}")
-        if not await self.load_model():
-            log("[TTS] SoVITS API not available")
-            return TTSResult(error="SoVITS API offline")
+        if self._mode == "server":
+            return await self._synthesize_remote(text, emotion, language, pack_id)
+        return await self._synthesize_local(text, emotion, language, pack_id)
+
+    async def _synthesize_remote(self, text: str, emotion: str, language: Optional[str], pack_id: Optional[str]) -> TTSResult:
+        log(f"[_synthesize_remote] Called with pack_id={pack_id}")
+        if not self._remote_handler:
+            log("[_synthesize_remote] Error: Remote handler not initialized")
+            return TTSResult(error="Remote handler not initialized")
+
+        target_pack = pack_id or self.config.pack_manager.get_pack_json_id()
+        log(f"[_synthesize_remote] Target pack: {target_pack}")
+        
+        log(f"[_synthesize_remote] Calling ensure_connected...")
+        connected = await self._remote_handler.ensure_connected(target_pack)
+        log(f"[_synthesize_remote] ensure_connected returned: {connected}")
+        
+        if not connected:
+            log("[_synthesize_remote] Error: Failed to connect to server")
+            return TTSResult(error="Failed to connect to server")
+
+        emotion_config = self._get_emotion_config(emotion, pack_id=pack_id)
+        if not emotion_config:
+            return TTSResult(error="Emotion config missing")
+
+        try:
+            ref_wav_path = self._resolve_ref_audio_path(emotion_config["ref_wav"], pack_id=pack_id)
+        except FileNotFoundError as e:
+            return TTSResult(error=str(e))
+
+        ref_lang = language if language else self.config.tts_language
+        prompt_lang = emotion_config.get("ref_lang", "ja")
+
+        remote_emotion_config = {
+            "ref_wav_path": str(ref_wav_path.absolute()),
+            "ref_text": emotion_config.get("ref_text", "").replace("\u30fb", " "),
+            "ref_lang": prompt_lang
+        }
+
+        params = {
+            "text_lang": ref_lang,
+            "top_k": int(self.config.sovits_top_k),
+            "top_p": float(self.config.sovits_top_p),
+            "temperature": float(self.config.sovits_temperature),
+            "speed": float(self.config.sovits_speed),
+            "text_split_method": self.config.sovits_text_split_method,
+            "fragment_interval": float(self.config.sovits_fragment_interval),
+            "timeout": self.config.sovits_timeout
+        }
+
+        result = await self._remote_handler.synthesize(text, remote_emotion_config, params, target_pack)
+        return result
+
+    async def _synthesize_local(self, text: str, emotion: str, language: Optional[str], pack_id: Optional[str]) -> TTSResult:
         try:
             emotion_config = self._get_emotion_config(emotion, pack_id=pack_id)
             if not emotion_config: return TTSResult(error="Emotion config missing")
@@ -207,8 +274,14 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
         if ref_wav_path.exists():
             return TTSResult(audio_path=str(ref_wav_path))
         return TTSResult(error="No fallback")
+
+    async def close_remote(self):
+        if self._remote_handler:
+            await self._remote_handler.close()
+
     def cleanup(self) -> None:
         import shutil
         if os.path.exists(self._temp_dir): shutil.rmtree(self._temp_dir, ignore_errors=True)
+
     def __del__(self):
         self.cleanup()

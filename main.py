@@ -33,6 +33,7 @@ log_dir.mkdir(exist_ok=True)
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 log_file = log_dir / f"app_{timestamp}.log"
 sovits_log_file = log_dir / f"sovits_{timestamp}.log"
+sovits_server_log_file = log_dir / f"sovits_server_{timestamp}.log"
 llm_log_file = log_dir / f"llm_{timestamp}.log"
 import logging
 def setup_dedicated_logger(name, file_path, level=logging.INFO):
@@ -47,6 +48,9 @@ def setup_dedicated_logger(name, file_path, level=logging.INFO):
 
 def get_sovits_logger():
     return setup_dedicated_logger("SoVITS", sovits_log_file)
+
+def get_sovits_server_logger():
+    return setup_dedicated_logger("SoVITS-Server", sovits_server_log_file)
 
 def get_llm_logger():
     return setup_dedicated_logger("LLM", llm_log_file)
@@ -508,8 +512,8 @@ class ApplicationController(QObject):
         self._cleanup_started = False
         self._settings_dialog = None
         self.state = self._load_state()
-        if self.config.sovits_enabled:
-            log("[Main] SoVITS startup begin.")
+        if self.config.sovits_enabled and self.config.sovits_mode == "local":
+            log("[Main] SoVITS startup begin (local mode).")
             self.sovits_manager = SoVITSManager(
                 self.project_root,
                 self.config.sovits_api_port,
@@ -519,6 +523,8 @@ class ApplicationController(QObject):
             if not self.sovits_manager.start(timeout=60, kill_existing=self.config.sovits_kill_existing):
                 QMessageBox.critical(None, "SoVITS Error", "无法启动 GPT-SoVITS 服务，请检查配置。")
                 sys.exit(1)
+        else:
+            self.sovits_manager = None
         self.mcp_manager = MCPManager(self.config)
         self.llm_backend = LLMBackend(self.config, log_path=llm_log_file, mcp_manager=self.mcp_manager)
         
@@ -533,6 +539,10 @@ class ApplicationController(QObject):
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
         self._loop_thread.start()
+        
+        if self.config.sovits_enabled and self.config.sovits_mode == "server":
+            log(f"[Main] SoVITS server mode: connecting to {self.config.sovits_server_host}:{self.config.sovits_server_port}")
+            asyncio.run_coroutine_threadsafe(self._connect_remote_sovits(), self._loop)
         if self.config.mcp_enabled:
             log("[Main] MCP startup begin.")
             future = asyncio.run_coroutine_threadsafe(self.mcp_manager.start(), self._loop)
@@ -1614,6 +1624,22 @@ class ApplicationController(QObject):
     def _run_loop(self):
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
+
+    async def _connect_remote_sovits(self):
+        try:
+            pack_id = self.config.pack_manager.get_pack_json_id()
+            if not pack_id:
+                log("[Main] No active pack, skipping remote SoVITS connection")
+                return
+            
+            log(f"[Main] Connecting to remote SoVITS with pack: {pack_id}")
+            connected = await self.tts_backend.ensure_connected(pack_id)
+            if connected:
+                log("[Main] Remote SoVITS connected successfully")
+            else:
+                log("[Main] Failed to connect to remote SoVITS server")
+        except Exception as e:
+            log(f"[Main] Error connecting to remote SoVITS: {e}")
     def _cleanup_temp_dir(self):
         import shutil
         temp_dir = self.project_root / "TEMP"

@@ -616,6 +616,21 @@ class ConfigManager:
     def sovits_kill_existing(self) -> bool:
         return self.getboolean("SoVITS", "kill_existing", True)
 
+    @property
+    def sovits_mode(self) -> str:
+        return self.get("SoVITS", "mode", "local")
+
+    @property
+    def sovits_server_auto_discover(self) -> bool:
+        return self.getboolean("SoVITS", "server_auto_discover", True)
+
+    @property
+    def sovits_server_host(self) -> str:
+        return self.get("SoVITS", "server_host", "127.0.0.1")
+
+    @property
+    def sovits_server_port(self) -> int:
+        return self.getint("SoVITS", "server_port", 9876)
 
     @property
     def mcp_enabled(self) -> bool:

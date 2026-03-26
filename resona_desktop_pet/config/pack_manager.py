@@ -67,6 +67,12 @@ class PackManager:
         self._load_pack_manifest()
         self._unload_plugins()
 
+    def get_pack_json_id(self, folder_name: Optional[str] = None) -> str:
+        target = folder_name if folder_name else self.active_pack_id
+        data = self._get_pack_data(target)
+        info = data.get("pack_info", {})
+        return info.get("id") or data.get("id") or target
+
     def _unload_plugins(self):
         self.loaded_plugins.clear()
         self.plugin_trigger_map.clear()

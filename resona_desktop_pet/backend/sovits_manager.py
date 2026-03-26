@@ -12,6 +12,18 @@ import signal
 import psutil
 from ..cleanup_manager import register_cleanup, register_pid
 
+_sovits_logger = None
+
+def set_sovits_logger(logger_func):
+    global _sovits_logger
+    _sovits_logger = logger_func
+
+def log_sovits(message):
+    if _sovits_logger:
+        _sovits_logger(message)
+    else:
+        print(message)
+
 class SoVITSManager:
     def __init__(self, project_root: Path, port: int = 9880, device: str = "cuda", model_version: str = "v2"):
         self.project_root = project_root
@@ -33,13 +45,18 @@ class SoVITSManager:
         except: self.rel_api_script = str(self.api_script)
         self.config_file = self.gpt_sovits_dir / "configs" / "tts_infer.yaml"
         
-    def is_running(self) -> bool:
+    def is_running(self, timeout: float = 2.0) -> bool:
         try:
-            response = requests.get(f"{self.api_url}/", timeout=2)
-            return response.status_code == 200 or response.status_code == 404
-        except Exception: return False
+            response = requests.get(f"{self.api_url}/", timeout=timeout)
+            result = response.status_code == 200 or response.status_code == 404
+            if not result:
+                log_sovits(f"[SoVITS] is_running check failed: status_code={response.status_code}")
+            return result
+        except Exception as e:
+            log_sovits(f"[SoVITS] is_running check exception: {e}")
+            return False
     
-    def start(self, timeout: int = 60, kill_existing: bool = False) -> bool:
+    def start(self, timeout: int = 60, kill_existing: bool = False, pack_id: str = None) -> bool:
         if self.is_running():
             if kill_existing:
                 self._kill_process_on_port(self.port)
@@ -64,13 +81,14 @@ class SoVITSManager:
             print(f"[SoVITS] Error: Config file not found at {self.config_file}")
             return False
         actual_config_file = self.config_file
-        pack_id = "Resona_Default"
-        try:
-            import configparser
-            cfg = configparser.ConfigParser()
-            cfg.read(self.project_root / "config.cfg", encoding="utf-8")
-            pack_id = cfg.get("General", "active_pack", fallback="Resona_Default")
-        except: pass
+        if pack_id is None:
+            pack_id = "Resona_Default"
+            try:
+                import configparser
+                cfg = configparser.ConfigParser()
+                cfg.read(self.project_root / "config.cfg", encoding="utf-8")
+                pack_id = cfg.get("General", "active_pack", fallback="Resona_Default")
+            except: pass
         
         pack_dir = self.project_root / "packs" / pack_id
         if not pack_dir.exists():
@@ -93,16 +111,24 @@ class SoVITSManager:
                 print(f"[SoVITS] Warning: Pack ID '{pack_id}' not found in any directory.")
                 
         pack_model_dir = pack_dir / "models" / "sovits"
+        log_sovits(f"[SoVITS] Starting with device={self.device}, model_version={self.model_version}")
         try:
             override_path = self.project_root / "TEMP" / f"tts_infer_override_{pack_id}.yaml"
             override_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.config_file, "r", encoding="utf-8") as f: content = f.read()
+            log_sovits(f"[SoVITS] Config file read from {self.config_file}, applying device={self.device} override")
+            orig_device_match = re.search(r'device:\s*(\w+)', content)
+            orig_is_half_match = re.search(r'is_half:\s*(\w+)', content)
+            if orig_device_match:
+                log_sovits(f"[SoVITS] Original config device: {orig_device_match.group(1)}")
+            if orig_is_half_match:
+                log_sovits(f"[SoVITS] Original config is_half: {orig_is_half_match.group(1)}")
             if self.device == "cuda":
-                content = content.replace("device: cpu", "device: cuda")
-                content = content.replace("is_half: false", "is_half: true")
+                content = re.sub(r'device\s*:\s*cpu', 'device: cuda', content, flags=re.IGNORECASE)
+                content = re.sub(r'is_half\s*:\s*false', 'is_half: true', content, flags=re.IGNORECASE)
             else:
-                content = content.replace("device: cuda", "device: cpu")
-                content = content.replace("is_half: true", "is_half: false")
+                content = re.sub(r'device\s*:\s*cuda', 'device: cpu', content, flags=re.IGNORECASE)
+                content = re.sub(r'is_half\s*:\s*true', 'is_half: false', content, flags=re.IGNORECASE)
             bert_abs = (self.gpt_sovits_dir / "GPT_SoVITS" / "pretrained_models" / "chinese-roberta-wwm-ext-large").absolute().as_posix()
             hubert_abs = (self.gpt_sovits_dir / "GPT_SoVITS" / "pretrained_models" / "chinese-hubert-base").absolute().as_posix()
             content = re.sub(r'bert_base_path:.*', f'bert_base_path: {bert_abs}', content)
@@ -123,15 +149,25 @@ class SoVITSManager:
                 content = re.sub(r'version:.*', f'version: {self.model_version}', content)
             with open(override_path, "w", encoding="utf-8") as f: f.write(content)
             actual_config_file = override_path
-            print(f"[SoVITS] Applied {self.device.upper()} config override: {actual_config_file}")
+            log_sovits(f"[SoVITS] Applied {self.device.upper()} config override: {actual_config_file}")
+            with open(override_path, "r", encoding="utf-8") as f: verify_content = f.read()
+            verify_device_match = re.search(r'device:\s*(\w+)', verify_content)
+            verify_is_half_match = re.search(r'is_half:\s*(\w+)', verify_content)
+            if verify_device_match:
+                log_sovits(f"[SoVITS] Verified written config device: {verify_device_match.group(1)}")
+            if verify_is_half_match:
+                log_sovits(f"[SoVITS] Verified written config is_half: {verify_is_half_match.group(1)}")
         except Exception as e:
-            print(f"[SoVITS] Warning: Failed to apply config override: {e}")
+            import traceback
+            log_sovits(f"[SoVITS] Warning: Failed to apply config override: {e}")
+            log_sovits(f"[SoVITS] Traceback: {traceback.format_exc()}")
         python_exec = sys.executable
         embedded_python = self.gpt_sovits_dir / "runtime" / "python.exe"
         if sys.platform == "win32" and embedded_python.exists(): python_exec = str(embedded_python)
         
         cmd = [python_exec, self.rel_api_script, "-a", "127.0.0.1", "-p", str(self.port), "-c", str(Path(actual_config_file).absolute())]
-        print(f"[SoVITS] Starting process with command: {' '.join(cmd)}")
+        log_sovits(f"[SoVITS] Starting process with command: {' '.join(cmd)}")
+        log_sovits(f"[SoVITS] Working directory: {self.gpt_sovits_dir}")
         try:
             preferred_encoding = locale.getpreferredencoding(False)
             if sys.platform == "win32":
@@ -176,7 +212,7 @@ class SoVITSManager:
             def stream_output(pipe, prefix):
                 try:
                     for line in iter(pipe.readline, ''):
-                        if line: print(f"{prefix} {line.strip()}")
+                        if line: log_sovits(f"{prefix} {line.strip()}")
                 except Exception: pass
             threading.Thread(target=stream_output, args=(self.process.stdout, "[SoVITS]"), daemon=True).start()
             threading.Thread(target=stream_output, args=(self.process.stderr, "[SoVITS Error]"), daemon=True).start()
