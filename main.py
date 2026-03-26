@@ -90,6 +90,18 @@ class AudioPlayer(QObject):
     def _on_status_changed(self, status):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.playback_finished.emit()
+    def refresh_audio_device(self):
+        try:
+            self._player.stop()
+            self._player.setAudioOutput(None)
+            self._audio_output = QAudioOutput()
+            self._audio_output.setVolume(1.0)
+            self._player.setAudioOutput(self._audio_output)
+            log("[AudioPlayer] Audio output device refreshed to system default")
+            return True
+        except Exception as e:
+            log(f"[AudioPlayer] Failed to refresh audio device: {e}")
+            return False
 
 class TimerScheduler(QObject):
     def __init__(self, controller):
@@ -575,6 +587,7 @@ class ApplicationController(QObject):
         self.external_query_signal.connect(self._handle_user_query)
         self.main_window.replay_requested.connect(self._replay_last_response)
         self.main_window.settings_requested.connect(self._show_settings)
+        self.main_window.refresh_audio_requested.connect(self._refresh_audio_devices)
         self.llm_response_ready.connect(self._handle_llm_response)
         self.tts_ready.connect(self._handle_tts_ready)
         self.stt_result_ready.connect(self._handle_stt_result)
@@ -1537,6 +1550,14 @@ class ApplicationController(QObject):
         log("[Main] Replaying last response...")
         self.main_window.start_thinking()
         self._handle_llm_response(self._last_llm_response)
+    def _refresh_audio_devices(self):
+        log("[Main] Refreshing audio devices...")
+        output_success = self.audio_player.refresh_audio_device()
+        input_success = self.stt_backend.refresh_audio_device()
+        if output_success and input_success:
+            log("[Main] Audio devices refreshed successfully")
+        else:
+            log("[Main] Failed to refresh some audio devices")
     def _handle_stt_request(self):
         if not self._stt_ready: return
         if self.stt_backend.is_recording():

@@ -22,7 +22,8 @@ class MainWindow(QWidget):
     replay_requested = Signal()
     pack_changed = Signal(str)
     settings_requested = Signal()
-    file_dropped = Signal(dict)  
+    file_dropped = Signal(dict)
+    refresh_audio_requested = Signal()  
     def __init__(self, config: ConfigManager, parent: QWidget = None):
         super().__init__(parent)
         self.config = config
@@ -764,6 +765,7 @@ class MainWindow(QWidget):
     def show_context_menu(self):
         menu = QMenu(self)
         menu.addAction("Replay Last Response", self.replay_requested.emit)
+        menu.addAction("Refresh Audio Devices", self.refresh_audio_requested.emit)
         menu.addSeparator()
         settings_action = menu.addAction("Settings", self.settings_requested.emit)
         menu.setStyleSheet("""

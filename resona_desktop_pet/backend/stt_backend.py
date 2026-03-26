@@ -287,3 +287,15 @@ class STTBackend:
     def stop_recording(self) -> None: self._is_recording = False
     def is_recording(self) -> bool: return self._is_recording
     def cleanup(self) -> None: self.stop_recording(); self.unregister_hotkey()
+    
+    def refresh_audio_device(self) -> bool:
+        try:
+            if self._is_recording:
+                self.stop_recording()
+                if self._record_thread and self._record_thread.is_alive():
+                    self._record_thread.join(timeout=2.0)
+            log("[STT] Audio input device refreshed to system default")
+            return True
+        except Exception as e:
+            log(f"[STT] Failed to refresh audio device: {e}")
+            return False
