@@ -44,8 +44,9 @@ class SoVITSManager:
         try: self.rel_api_script = os.path.relpath(self.api_script, self.gpt_sovits_dir)
         except: self.rel_api_script = str(self.api_script)
         self.config_file = self.gpt_sovits_dir / "configs" / "tts_infer.yaml"
+        self._start_time: Optional[float] = None
         
-    def is_running(self, timeout: float = 2.0) -> bool:
+    def is_running(self, timeout: float = 2.0, suppress_exception: bool = False) -> bool:
         try:
             response = requests.get(f"{self.api_url}/", timeout=timeout)
             result = response.status_code == 200 or response.status_code == 404
@@ -53,7 +54,8 @@ class SoVITSManager:
                 log_sovits(f"[SoVITS] is_running check failed: status_code={response.status_code}")
             return result
         except Exception as e:
-            log_sovits(f"[SoVITS] is_running check exception: {e}")
+            if not suppress_exception:
+                log_sovits(f"[SoVITS] is_running check exception: {e}")
             return False
     
     def start(self, timeout: int = 60, kill_existing: bool = False, pack_id: str = None) -> bool:
@@ -62,6 +64,7 @@ class SoVITSManager:
                 self._kill_process_on_port(self.port)
                 time.sleep(2)
             else: return True
+        self._start_time = time.time()
         
         if sys.platform == "win32":
             try:
@@ -219,8 +222,11 @@ class SoVITSManager:
             
             print(f"[SoVITS] Process started (PID: {self.process.pid}). Waiting for API to be ready...")
             start_time = time.time()
+            SUPPRESS_DURATION = 55  # 前55秒内不打印is_running异常
             while time.time() - start_time < timeout:
-                if self.is_running():
+                elapsed = time.time() - self._start_time if self._start_time else float('inf')
+                suppress = elapsed < SUPPRESS_DURATION
+                if self.is_running(suppress_exception=suppress):
                     print(f"[SoVITS] API is ready after {time.time() - start_time:.2f}s")
                     return True
                 if self.process.poll() is not None:

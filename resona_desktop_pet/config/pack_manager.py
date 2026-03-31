@@ -3,6 +3,7 @@ import os
 import sys
 import importlib.util
 import random
+import configparser
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -17,6 +18,9 @@ class PackManager:
         self.loaded_plugins: Dict[str, Any] = {}
         self.plugin_trigger_map: Dict[str, str] = {}
         self.plugin_action_map: Dict[str, str] = {}
+        self.override_config: Optional[configparser.ConfigParser] = None
+        self.override_config_path: Optional[Path] = None
+        self._previous_pack_override: Optional[configparser.ConfigParser] = None
         self._scan_packs()
 
     def _get_pack_data(self, pack_id: str) -> Dict[str, Any]:
@@ -62,10 +66,51 @@ class PackManager:
         self._scan_packs()
         folder_name = self.id_map.get(pack_id, pack_id)
         print(f"[PackManager] set_active_pack requested={pack_id} resolved={folder_name} packs_dir={self.packs_dir}")
+
+        self._previous_pack_override = self.override_config
+
         self.active_pack_id = folder_name
         self.pack_data = self._get_pack_data(folder_name)
         self._load_pack_manifest()
         self._unload_plugins()
+
+        self._load_override_config()
+
+    def _load_override_config(self):
+        override_path = self.packs_dir / self.active_pack_id / "override_config.cfg"
+
+        if override_path.exists():
+            print(f"[PackManager] Found override_config.cfg in pack '{self.active_pack_id}'")
+            self.override_config = configparser.ConfigParser(interpolation=None)
+            try:
+                self.override_config.read(override_path, encoding="utf-8")
+                self.override_config_path = override_path
+                print(f"[PackManager] Loaded override config with sections: {self.override_config.sections()}")
+            except Exception as e:
+                print(f"[PackManager] Failed to load override_config.cfg: {e}")
+                self.override_config = None
+                self.override_config_path = None
+        else:
+            if self.override_config is not None:
+                print(f"[PackManager] Pack '{self.active_pack_id}' has no override_config.cfg, clearing previous override")
+            self.override_config = None
+            self.override_config_path = None
+
+    def get_override_value(self, section: str, key: str, fallback: Any = None) -> Optional[str]:
+        if self.override_config is None:
+            return None
+        try:
+            return self.override_config.get(section, key, fallback=None)
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            return None
+
+    def has_override(self) -> bool:
+        return self.override_config is not None
+
+    def get_override_sections(self) -> list:
+        if self.override_config is None:
+            return []
+        return self.override_config.sections()
 
     def get_pack_json_id(self, folder_name: Optional[str] = None) -> str:
         target = folder_name if folder_name else self.active_pack_id

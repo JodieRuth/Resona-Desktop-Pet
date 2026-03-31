@@ -419,6 +419,7 @@ class ApplicationController(QObject):
     request_global_show = Signal()
     pack_switch_ready = Signal()
     external_query_signal = Signal(str)
+    sovits_ready = Signal(bool, str)
     def __init__(self, sovits_log_path: Optional[Path] = None):
         super().__init__()
         self.config = ConfigManager(str(project_root / "config.cfg"))
@@ -428,6 +429,11 @@ class ApplicationController(QObject):
         log(f"[Debug] PackManager Active ID: {pm.active_pack_id}")
         
         self._loop = asyncio.get_event_loop()
+        
+        self.sovits_manager = None
+        self._sovits_startup_attempts = 0
+        self._sovits_max_attempts = 3
+        self._sovits_startup_thread = None
         
         if self.config.html_enabled:
             QTimer.singleShot(3000, self._start_web_server)
@@ -512,19 +518,12 @@ class ApplicationController(QObject):
         self._cleanup_started = False
         self._settings_dialog = None
         self.state = self._load_state()
+        
         if self.config.sovits_enabled and self.config.sovits_mode == "local":
-            log("[Main] SoVITS startup begin (local mode).")
-            self.sovits_manager = SoVITSManager(
-                self.project_root,
-                self.config.sovits_api_port,
-                self.config.sovits_device,
-                self.config.sovits_model_version
-            )
-            if not self.sovits_manager.start(timeout=60, kill_existing=self.config.sovits_kill_existing):
-                QMessageBox.critical(None, "SoVITS Error", "无法启动 GPT-SoVITS 服务，请检查配置。")
-                sys.exit(1)
-        else:
-            self.sovits_manager = None
+            log("[Main] SoVITS async startup scheduled (local mode).")
+            self.sovits_ready.connect(self._on_sovits_ready)
+            self._start_sovits_async()
+        
         self.mcp_manager = MCPManager(self.config)
         self.llm_backend = LLMBackend(self.config, log_path=llm_log_file, mcp_manager=self.mcp_manager)
         
@@ -626,6 +625,65 @@ class ApplicationController(QObject):
     @property
     def is_busy(self) -> bool:
         return self._is_chain_executing or self.main_window.is_busy or self.interaction_locked
+    
+    def _start_sovits_async(self):
+        if self._sovits_startup_thread and self._sovits_startup_thread.is_alive():
+            log("[Main] SoVITS startup thread already running.")
+            return
+        
+        self._sovits_startup_thread = threading.Thread(
+            target=self._sovits_startup_worker,
+            daemon=True
+        )
+        self._sovits_startup_thread.start()
+    
+    def _sovits_startup_worker(self):
+        while self._sovits_startup_attempts < self._sovits_max_attempts:
+            self._sovits_startup_attempts += 1
+            attempt = self._sovits_startup_attempts
+            
+            log(f"[Main] SoVITS startup attempt {attempt}/{self._sovits_max_attempts}")
+            
+            try:
+                manager = SoVITSManager(
+                    self.project_root,
+                    self.config.sovits_api_port,
+                    self.config.sovits_device,
+                    self.config.sovits_model_version
+                )
+                
+                if manager.start(timeout=60, kill_existing=self.config.sovits_kill_existing):
+                    self.sovits_manager = manager
+                    log(f"[Main] SoVITS started successfully on attempt {attempt}.")
+                    self.sovits_ready.emit(True, f"SoVITS service ready (attempt {attempt}/{self._sovits_max_attempts})")
+                    return
+                else:
+                    log(f"[Main] SoVITS startup attempt {attempt} failed: start() returned False")
+                    if manager.process:
+                        try:
+                            manager.stop()
+                        except:
+                            pass
+            except Exception as e:
+                log(f"[Main] SoVITS startup attempt {attempt} exception: {e}")
+            
+            if attempt < self._sovits_max_attempts:
+                log(f"[Main] Retrying SoVITS startup in 2 seconds...")
+                time.sleep(2)
+        
+        log(f"[Main] SoVITS startup failed after {self._sovits_max_attempts} attempts.")
+        self.sovits_ready.emit(False, f"SoVITS service startup failed after {self._sovits_max_attempts} attempts")
+    
+    def _on_sovits_ready(self, success: bool, message: str):
+        if success:
+            log(f"[Main] SoVITS ready: {message}")
+            print(f"[Main] {message}")
+        else:
+            log(f"[Main] SoVITS failed: {message}")
+            QMessageBox.critical(None, "SoVITS Startup Failed", 
+                f"Failed to start GPT-SoVITS service.\n\n{message}\n\nPlease check your configuration.")
+            sys.exit(1)
+    
     def _init_hotkeys(self):
         try:
             import keyboard
