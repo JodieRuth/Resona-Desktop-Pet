@@ -264,11 +264,6 @@ class LLMBackend:
             log(f"[SubAgent] Fatal Error: {traceback.format_exc()}")
             return f"SubAgent delegation error: {e}"
 
-    def _prune_subagent_history(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if len(messages) <= 4:
-            return messages
-        return messages
-
     def _extract_tool_calls(self, response: Any) -> List[Any]:
         if isinstance(response, dict):
             choices = response.get("choices", [])
