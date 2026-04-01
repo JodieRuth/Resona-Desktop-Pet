@@ -298,19 +298,16 @@ class LLMBackend:
     def _build_messages(self, question: str, extra_context: Optional[str] = None, history: Optional[ConversationHistory] = None, pack_id: Optional[str] = None, source: str = "desktop") -> list:
         messages = []
         system_prompt = self.config.get_prompt(pack_id=pack_id)
-        
+
         context_parts = []
         if self.config.enable_time_context:
             context_parts.append(f"[Local Time: {self._get_precise_time_context()}]")
         if self.config.enable_ip_context and self._ip_context:
             context_parts.append(f"[User IP: {self._ip_context}]")
-        
-        if context_parts:
-            system_prompt = f"{system_prompt}\n\nEnvironment Context:\n" + "\n".join(context_parts)
 
         if source == "desktop" and self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
             system_prompt = f"{system_prompt}\n\n{self._get_mcp_system_instruction()}"
-        
+
         if self.config.tts_language == "ja":
             ja_tts_instruction = (
                 "\n\n[CRITICAL TTS PRONUNCIATION RULES]\n"
@@ -326,6 +323,9 @@ class LLMBackend:
             system_prompt = f"{system_prompt}{ja_tts_instruction}"
 
         messages.append({"role": "system", "content": system_prompt})
+
+        if context_parts:
+            messages.append({"role": "user", "content": "Environment Context:\n" + "\n".join(context_parts)})
 
         question_blocks = []
         if source and source != "desktop" and source != "idle_trigger":
@@ -612,11 +612,11 @@ class LLMBackend:
             response.error = f"JSON parsing failed: {str(e)}"
             return response
 
-    def _log_interaction(self, request_data: Any, response_raw: str):
+    def _log_interaction(self, request_data: Any, response_raw: str, usage_stats: Optional[Tuple[Optional[int], Optional[int], Optional[int], Optional[int]]] = None):
         import logging
         import copy
         llm_logger = logging.getLogger("LLM")
-        
+
         if not self.log_path: return
 
         def mask_base64(obj):
@@ -637,28 +637,99 @@ class LLMBackend:
                 return [mask_base64(item) for item in obj]
             return obj
 
+        def flatten_tools(obj):
+            if isinstance(obj, dict):
+                new_dict = {}
+                for k, v in obj.items():
+                    if k == "tools" and isinstance(v, list):
+                        flattened_tools = []
+                        for tool in v:
+                            if isinstance(tool, dict) and "function" in tool:
+                                func = tool.get("function", {})
+                                flat_func = {}
+                                for fk, fv in func.items():
+                                    if fk == "description":
+                                        flat_func[fk] = fv.replace("\n", " ").strip() if isinstance(fv, str) else fv
+                                    elif isinstance(fv, str):
+                                        flat_func[fk] = fv
+                                    else:
+                                        flat_func[fk] = flatten_tools(fv)
+                                flattened_tools.append({"type": "function", "function": flat_func})
+                            else:
+                                flattened_tools.append(flatten_tools(tool))
+                        new_dict[k] = flattened_tools
+                    else:
+                        new_dict[k] = flatten_tools(v)
+                return new_dict
+            elif isinstance(obj, list):
+                return [flatten_tools(item) for item in obj]
+            return obj
+
+        def reorder_for_logging(obj):
+            if isinstance(obj, dict):
+                prioritized_keys = ["model", "messages", "tools", "temperature", "top_p", "max_tokens", "base_url", "api_key", "tool_choice"]
+                ordered_dict = {}
+                remaining = {}
+                for k, v in obj.items():
+                    if k in prioritized_keys:
+                        ordered_dict[k] = reorder_for_logging(v)
+                    else:
+                        remaining[k] = reorder_for_logging(v)
+                for k in prioritized_keys:
+                    if k in obj and k not in ordered_dict:
+                        ordered_dict[k] = reorder_for_logging(obj[k])
+                ordered_dict.update(remaining)
+                return ordered_dict
+            elif isinstance(obj, list):
+                if obj and isinstance(obj[0], dict) and "role" in obj[0]:
+                    system_msgs = [m for m in obj if m.get("role") == "system"]
+                    user_msgs = [m for m in obj if m.get("role") == "user"]
+                    assistant_msgs = [m for m in obj if m.get("role") == "assistant"]
+                    tool_msgs = [m for m in obj if m.get("role") == "tool"]
+                    other_msgs = [m for m in obj if m.get("role") not in ["system", "user", "assistant", "tool"]]
+                    reordered = system_msgs + assistant_msgs + tool_msgs + user_msgs + other_msgs
+                    return [reorder_for_logging(m) for m in reordered]
+                return [reorder_for_logging(item) for item in obj]
+            return obj
+
         try:
             safe_data = mask_base64(request_data)
+            safe_data = flatten_tools(safe_data)
+            safe_data = reorder_for_logging(safe_data)
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.log_path, "a", encoding="utf-8") as f:
                 ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                f.write(f"\n={'='*20} {ts} {'='*20}\n")
+                f.write(f"\n{'='*20} {ts} {'='*20}\n\n")
                 if isinstance(safe_data, str):
-                    f.write(f"[STATUS] {safe_data}\n")
+                    f.write(f"[STATUS]\n{safe_data}\n\n")
                 else:
                     if isinstance(safe_data, dict) and "messages" in safe_data:
                         msgs = safe_data["messages"]
                         if len(msgs) > 3:
                             compact_data = copy.deepcopy(safe_data)
                             compact_data["messages"] = [msgs[0], "... [HISTORY TRUNCATED] ...", msgs[-1]]
-                            f.write(f"[REQUEST (COMPACT)]\n{json.dumps(compact_data, ensure_ascii=False, indent=2)}\n")
+                            f.write(f"[REQUEST (COMPACT)]\n{json.dumps(compact_data, ensure_ascii=False, indent=2)}\n\n")
                         else:
-                            f.write(f"[REQUEST]\n{json.dumps(safe_data, ensure_ascii=False, indent=2)}\n")
+                            f.write(f"[REQUEST]\n{json.dumps(safe_data, ensure_ascii=False, indent=2)}\n\n")
                     else:
-                        f.write(f"[REQUEST]\n{json.dumps(safe_data, ensure_ascii=False, indent=2)}\n")
-                
-                f.write(f"[RESPONSE RAW]\n{response_raw}\n")
-            
+                        f.write(f"[REQUEST]\n{json.dumps(safe_data, ensure_ascii=False, indent=2)}\n\n")
+
+                f.write(f"[RESPONSE RAW]\n{response_raw}\n\n")
+
+                if usage_stats:
+                    prompt_tokens, completion_tokens, total_tokens, cached_tokens = usage_stats
+                    usage_lines = ["[TOKEN USAGE]"]
+                    if prompt_tokens is not None:
+                        usage_lines.append(f"  prompt_tokens: {prompt_tokens}")
+                    if completion_tokens is not None:
+                        usage_lines.append(f"  completion_tokens: {completion_tokens}")
+                    if total_tokens is not None:
+                        usage_lines.append(f"  total_tokens: {total_tokens}")
+                    if cached_tokens is not None:
+                        usage_lines.append(f"  cached_tokens: {cached_tokens}")
+                    if len(usage_lines) > 1:
+                        f.write("\n".join(usage_lines) + "\n")
+
             # llm_logger.info(f"Interaction logged to {self.log_path.name}")
         except Exception as e:
             print(f"[LLM] Logging error: {e}")
@@ -751,7 +822,8 @@ class LLMBackend:
                     raw_text = re.sub(pattern, "", raw_text, flags=re.DOTALL).strip()
         tool_calls = self._extract_tool_calls(response)
         log_content = f"[Reasoning]\n{reasoning}\n\n[Content]\n{raw_text}" if reasoning else raw_text
-        self._log_interaction(request_payload, log_content)
+        usage_stats = (prompt_tokens, completion_tokens, total_tokens, cached_tokens)
+        self._log_interaction(request_payload, log_content, usage_stats)
         return response, raw_text, reasoning, tool_calls
 
     async def _query_litellm(
@@ -787,7 +859,7 @@ class LLMBackend:
             llm_resp.thought = reasoning
             return llm_resp
         except Exception as e:
-            self._log_interaction("EXCEPTION", str(e))
+            self._log_interaction("EXCEPTION", str(e), None)
             return LLMResponse(error=str(e))
 
     async def query_raw(

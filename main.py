@@ -434,6 +434,8 @@ class ApplicationController(QObject):
         self._sovits_startup_attempts = 0
         self._sovits_max_attempts = 3
         self._sovits_startup_thread = None
+        self._sovits_ready = False
+        self._pending_tts_requests: list = []
         
         if self.config.html_enabled:
             QTimer.singleShot(3000, self._start_web_server)
@@ -676,10 +678,24 @@ class ApplicationController(QObject):
     
     def _on_sovits_ready(self, success: bool, message: str):
         if success:
+            self._sovits_ready = True
             log(f"[Main] SoVITS ready: {message}")
             print(f"[Main] {message}")
+            
+            if self._pending_tts_requests:
+                print(f"[Main] Processing {len(self._pending_tts_requests)} pending TTS request(s)...")
+                for req in self._pending_tts_requests:
+                    text, emotion, language, queued_at = req
+                    delay = time.time() - queued_at
+                    print(f"[Main] Sending delayed TTS request (delayed {delay:.2f}s): '{text[:30]}...'")
+                    asyncio.run_coroutine_threadsafe(
+                        self._generate_tts_internal(text, emotion, language),
+                        self._loop
+                    )
+                self._pending_tts_requests.clear()
         else:
             log(f"[Main] SoVITS failed: {message}")
+            self._pending_tts_requests.clear()
             QMessageBox.critical(None, "SoVITS Startup Failed", 
                 f"Failed to start GPT-SoVITS service.\n\n{message}\n\nPlease check your configuration.")
             sys.exit(1)
@@ -1182,6 +1198,15 @@ class ApplicationController(QObject):
             log("[Main] No audio source available, showing text response with timeout.")
             self.main_window.show_behavior_response_with_timeout(text, emotion)
     async def _generate_tts(self, text: str, emotion: str, language: Optional[str] = None):
+        if self.config.sovits_enabled and self.config.sovits_mode == "local" and not self._sovits_ready:
+            queued_at = time.time()
+            self._pending_tts_requests.append((text, emotion, language, queued_at))
+            print(f"[Main] TTS request queued (SoVITS not ready): '{text[:30]}...'")
+            return
+        
+        await self._generate_tts_internal(text, emotion, language)
+    
+    async def _generate_tts_internal(self, text: str, emotion: str, language: Optional[str] = None):
         get_sovits_logger()
         self._mark_tts_activity()
 
