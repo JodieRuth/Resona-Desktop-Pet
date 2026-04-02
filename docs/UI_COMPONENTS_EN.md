@@ -28,6 +28,28 @@ The dialogue box component.
 - **Character Name Display**: Displays the current character name and username.
 - **Regenerate Button**: Supports clicking to regenerate LLM responses.
 
+### 3.1 Custom Dialog Background
+Supports using custom images to replace the default program-drawn dialog background.
+
+**Configuration** (`config.cfg`):
+```ini
+[General]
+dialog_use_custom_image = true          # Enable custom image background
+dialog_image_path = resona_desktop_pet/ui/window_resona.png  # Image path
+dialog_image_opacity = 70               # Image opacity (0-100)
+```
+
+**Image Requirements**:
+- Supported formats: PNG (recommended, supports transparency), JPG, JPEG
+- Path support: Relative paths (relative to project root) or absolute paths
+- Size recommendation: Match dialog dimensions (default 380x135 pixels)
+- Transparent background: Use PNG format for transparent background effects
+
+**Use Cases**:
+- **Themed Dialogs**: Design unique dialog styles for different characters
+- **Brand Customization**: Use custom UI elements for unified visual style
+- **Transparent Effects**: Achieve special-shaped dialogs through PNG alpha channel
+
 ## 4. Tray Icon (`tray_icon.py`)
 - Enables background operation.
 - Provides a quick-access menu for settings, pack switching, and exiting.

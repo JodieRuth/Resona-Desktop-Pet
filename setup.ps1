@@ -10,6 +10,8 @@ $PACK_URL = 'https://huggingface.co/datasets/JodieRuth/test1/resolve/main/Resona
 # Distribution & Conversion by k2-fsa/sherpa-onnx (Apache-2.0)
 $STT_URL = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2'
 $FFMPEG_URL = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
+# Vector Embedding Model (Sentence Transformers - ONNX)
+$VECTOR_MODEL_BASE_URL = 'https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/main'
 
 # --- GPU Detection ---
 $gpus = Get-CimInstance Win32_VideoController
@@ -49,6 +51,7 @@ $useMirror = Read-Host 'Enable these mirrors? (Y/N, default is N)'
 if ($useMirror -eq 'Y' -or $useMirror -eq 'y') {
     $SOVITS_URL = $SOVITS_URL -replace 'huggingface.co', 'hf-mirror.com'
     $PACK_URL = $PACK_URL -replace 'huggingface.co', 'hf-mirror.com'
+    $VECTOR_MODEL_BASE_URL = $VECTOR_MODEL_BASE_URL -replace 'huggingface.co', 'hf-mirror.com'
     # GitHub Mirror
     $STT_URL = "https://gh-proxy.com/" + $STT_URL
     $FFMPEG_URL = "https://gh-proxy.com/" + $FFMPEG_URL
@@ -214,6 +217,15 @@ if (!(Test-Path 'ffmpeg\bin\ffmpeg.exe')) {
     Write-Host "[Resona] FFmpeg detected. Skipping." -ForegroundColor Green
 }
 
+# Vector Model Check
+$doDownloadVector = $false
+if (!(Test-Path 'memory\sentence-transformers\config.json')) {
+    $res = Read-Host 'Download Vector Embedding Model (~135MB for ONNX quantized)? (Y/N, recommended for memory features)'
+    if ($res -eq 'Y' -or $res -eq 'y') { $doDownloadVector = $true }
+} else {
+    Write-Host "[Resona] Vector Model detected. Skipping." -ForegroundColor Green
+}
+
 # --- 5. Sequential Execution of Downloads ---
 
 # SoVITS
@@ -317,6 +329,43 @@ if ($doDownloadFfmpeg) {
     } else {
         Write-Error "[Resona] FFmpeg Download failed."
     }
+}
+
+# Vector Model
+if ($doDownloadVector) {
+    Write-Host "`n[Resona] Starting Vector Model download..." -ForegroundColor Cyan
+    Write-Host '[Resona] Fetching Vector Model files...'
+    if (!(Test-Path 'memory\sentence-transformers\onnx')) { New-Item -ItemType Directory -Path 'memory\sentence-transformers\onnx' -Force }
+
+    $vectorFiles = @(
+        "config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "sentencepiece.bpe.model",
+        "special_tokens_map.json",
+        "onnx/model_quint8_avx2.onnx"
+    )
+
+    foreach ($file in $vectorFiles) {
+        $fileName = Split-Path $file -Leaf
+        $fileDir = if ($file -like "onnx/*") { "memory\sentence-transformers\onnx" } else { "memory\sentence-transformers" }
+        $fileUrl = "$VECTOR_MODEL_BASE_URL/$file"
+
+        Write-Host "[Resona] Downloading: $fileName" -ForegroundColor Gray
+
+        $curlArgs = @("-L", "-f", "-C", "-", $fileUrl, "-o", "$fileDir\$fileName", "--retry", "5", "--connect-timeout", "30")
+        if ($useProxy -eq 'Y' -or $useProxy -eq 'y') {
+            $curlArgs += @("-x", $fullProxy)
+        }
+
+        & curl.exe @curlArgs
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "[Resona] Failed to download: $fileName"
+        }
+    }
+
+    Write-Host '[Resona] Vector Model download complete.' -ForegroundColor Green
 }
 
 Write-Host "`n[Resona] Setup complete! Please run run.bat to start." -ForegroundColor Green

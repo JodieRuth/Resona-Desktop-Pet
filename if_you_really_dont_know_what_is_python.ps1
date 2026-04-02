@@ -10,6 +10,7 @@ $SOVITS_URL = 'https://hf-mirror.com/datasets/JodieRuth/test123/resolve/main/GPT
 $PACK_URL = 'https://hf-mirror.com/datasets/JodieRuth/test1/resolve/main/Resona_Default.zip'
 $STT_URL = 'https://gh-proxy.com/https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2'
 $FFMPEG_URL = 'https://gh-proxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
+$VECTOR_MODEL_BASE_URL = 'https://hf-mirror.com/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/main'
 
 $DISCLAIMER = @'
 *******************************************************************************
@@ -161,6 +162,36 @@ if (!(Test-Path 'ffmpeg\bin\ffmpeg.exe')) {
             if (Test-Path 'ffmpeg') { Remove-Item 'ffmpeg' -Recurse -Force }
             Move-Item -Path $innerFolder.FullName -Destination 'ffmpeg'
             Remove-Item 'ffmpeg_temp' -Recurse -Force
+        }
+    }
+}
+
+# Vector Model
+if (!(Test-Path 'memory\sentence-transformers\config.json')) {
+    Write-Host "`n[Resona] Downloading Vector Model (~135MB)..." -ForegroundColor Cyan
+    if (!(Test-Path 'memory\sentence-transformers\onnx')) { New-Item -ItemType Directory -Path 'memory\sentence-transformers\onnx' -Force }
+
+    $vectorFiles = @(
+        "config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "sentencepiece.bpe.model",
+        "special_tokens_map.json",
+        "onnx/model_quint8_avx2.onnx"
+    )
+
+    foreach ($file in $vectorFiles) {
+        $fileName = Split-Path $file -Leaf
+        $fileDir = if ($file -like "onnx/*") { "memory\sentence-transformers\onnx" } else { "memory\sentence-transformers" }
+        $fileUrl = "$VECTOR_MODEL_BASE_URL/$file"
+
+        Write-Host "[Resona] Downloading: $fileName" -ForegroundColor Gray
+
+        $curlArgs = @("-L", "-f", "-C", "-", $fileUrl, "-o", "$fileDir\$fileName", "--retry", "5")
+        & curl.exe @curlArgs
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "[Resona] Failed to download: $fileName"
         }
     }
 }

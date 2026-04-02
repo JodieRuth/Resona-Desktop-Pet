@@ -7,7 +7,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QLabel, QLineEdit, QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox,
-    QPushButton, QGroupBox, QFormLayout, QFileDialog, QMessageBox
+    QPushButton, QGroupBox, QFormLayout, QFileDialog, QMessageBox,
+    QScrollArea
 )
 
 from ..config import ConfigManager
@@ -34,10 +35,12 @@ class SettingsDialog(QDialog):
             }
             QGroupBox {
                 color: #e6e6e6;
+                background-color: #2a2a2a;
                 border: 1px solid #3a3a3a;
                 border-radius: 5px;
                 margin-top: 10px;
                 padding-top: 10px;
+                font-weight: bold;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -144,9 +147,9 @@ class SettingsDialog(QDialog):
 
     def _make_form_layout(self, parent: QWidget) -> QFormLayout:
         layout = QFormLayout(parent)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setHorizontalSpacing(14)
-        layout.setVerticalSpacing(10)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setHorizontalSpacing(20)
+        layout.setVerticalSpacing(12)
         layout.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         layout.setFormAlignment(Qt.AlignTop | Qt.AlignLeft)
         layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
@@ -235,53 +238,87 @@ class SettingsDialog(QDialog):
     def _create_appearance_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+        layout.setSpacing(15)
+        layout.setContentsMargins(15, 15, 15, 15)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("""
+            QScrollArea { border: none; background-color: #242424; }
+            QScrollBar:vertical {
+                background-color: #2a2a2a;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #4a4a4a;
+                border-radius: 6px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #5a5a5a;
+            }
+        """)
+
+        content_widget = QWidget()
+        content_widget.setStyleSheet("background-color: #242424;")
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(15)
+        content_layout.setContentsMargins(10, 10, 10, 10)
+
+
         size_group = QGroupBox("Window Size")
         size_layout = self._make_form_layout(size_group)
-        
+
         self.width_spin = QSpinBox()
         self.width_spin.setRange(100, 2000)
         self.width_spin.setSingleStep(10)
         size_layout.addRow("Window Width:", self.width_spin)
-        
+
         self.height_spin = QSpinBox()
         self.height_spin.setRange(100, 2000)
         self.height_spin.setSingleStep(10)
         size_layout.addRow("Window Height:", self.height_spin)
-        
-        layout.addWidget(size_group)
-        
-        ui_group = QGroupBox("Dialogue UI")
-        ui_layout = self._make_form_layout(ui_group)
-        
+
+        content_layout.addWidget(size_group)
+
+        dialogue_size_group = QGroupBox("Dialogue Size")
+        dialogue_size_layout = self._make_form_layout(dialogue_size_group)
+
         self.dialogue_width_spin = QSpinBox()
         self.dialogue_width_spin.setRange(100, 1000)
         self.dialogue_width_spin.setSingleStep(10)
-        ui_layout.addRow("Dialogue Width:", self.dialogue_width_spin)
-        
+        dialogue_size_layout.addRow("Dialogue Width:", self.dialogue_width_spin)
+
         self.dialogue_height_spin = QSpinBox()
         self.dialogue_height_spin.setRange(50, 500)
         self.dialogue_height_spin.setSingleStep(10)
-        ui_layout.addRow("Dialogue Min Height:", self.dialogue_height_spin)
-        
+        dialogue_size_layout.addRow("Dialogue Min Height:", self.dialogue_height_spin)
+
+        content_layout.addWidget(dialogue_size_group)
+
+        appearance_group = QGroupBox("Appearance")
+        appearance_layout = self._make_form_layout(appearance_group)
+
         self.font_scale_spin = QDoubleSpinBox()
         self.font_scale_spin.setRange(0.5, 3.0)
         self.font_scale_spin.setSingleStep(0.1)
-        ui_layout.addRow("Font Scale:", self.font_scale_spin)
-        
+        appearance_layout.addRow("Font Scale:", self.font_scale_spin)
+
         self.dialog_color_edit = QLineEdit()
         self.dialog_color_edit.setPlaceholderText("RGB (0,0,0) or Hex (#000000)")
-        ui_layout.addRow("Dialog Color:", self.dialog_color_edit)
-        
+        appearance_layout.addRow("Dialog Color:", self.dialog_color_edit)
+
         self.dialog_opacity_spin = QSpinBox()
         self.dialog_opacity_spin.setRange(0, 100)
         self.dialog_opacity_spin.setSuffix("%")
-        ui_layout.addRow("Dialog Opacity:", self.dialog_opacity_spin)
-        
+        appearance_layout.addRow("Dialog Opacity:", self.dialog_opacity_spin)
+
         self.dialog_text_color_edit = QLineEdit()
         self.dialog_text_color_edit.setPlaceholderText("RGB (255,255,255) or Hex (#FFFFFF)")
-        ui_layout.addRow("Text Color:", self.dialog_text_color_edit)
-        
+        appearance_layout.addRow("Text Color:", self.dialog_text_color_edit)
+
         font_layout = QHBoxLayout()
         self.dialog_font_edit = QLineEdit()
         self.dialog_font_edit.setPlaceholderText("Leave empty for system default")
@@ -289,28 +326,84 @@ class SettingsDialog(QDialog):
         browse_font_btn = QPushButton("Browse")
         browse_font_btn.clicked.connect(lambda: self._browse_file(self.dialog_font_edit, "Font Files (*.ttf *.otf)"))
         font_layout.addWidget(browse_font_btn)
-        ui_layout.addRow("Font File:", font_layout)
+        appearance_layout.addRow("Font File:", font_layout)
 
-        ui_layout.addRow("", QLabel(""))  
+        content_layout.addWidget(appearance_group)
+
+        stroke_group = QGroupBox("Text Stroke")
+        stroke_layout = self._make_form_layout(stroke_group)
+
+        self.dialog_text_stroke_enabled_check = QCheckBox("Enable Text Stroke")
+        stroke_layout.addRow(self.dialog_text_stroke_enabled_check)
+
+        self.dialog_text_stroke_color_edit = QLineEdit()
+        self.dialog_text_stroke_color_edit.setPlaceholderText("RGB (0,0,0) or Hex (#000000)")
+        stroke_layout.addRow("Stroke Color:", self.dialog_text_stroke_color_edit)
+
+        self.dialog_text_stroke_width_spin = QSpinBox()
+        self.dialog_text_stroke_width_spin.setRange(0, 10)
+        self.dialog_text_stroke_width_spin.setSuffix(" px")
+        stroke_layout.addRow("Stroke Width:", self.dialog_text_stroke_width_spin)
+
+        content_layout.addWidget(stroke_group)
+
+        shadow_group = QGroupBox("Text Shadow")
+        shadow_layout = self._make_form_layout(shadow_group)
+
+        self.dialog_text_shadow_enabled_check = QCheckBox("Enable Text Shadow")
+        shadow_layout.addRow(self.dialog_text_shadow_enabled_check)
+
+        self.dialog_text_shadow_color_edit = QLineEdit()
+        self.dialog_text_shadow_color_edit.setPlaceholderText("RGB (0,0,0) or Hex (#000000)")
+        shadow_layout.addRow("Shadow Color:", self.dialog_text_shadow_color_edit)
+
+        shadow_offset_layout = QHBoxLayout()
+        self.dialog_text_shadow_offset_x_spin = QSpinBox()
+        self.dialog_text_shadow_offset_x_spin.setRange(-20, 20)
+        self.dialog_text_shadow_offset_x_spin.setSingleStep(1)
+        self.dialog_text_shadow_offset_x_spin.setSuffix(" px")
+        shadow_offset_layout.addWidget(QLabel("X:"))
+        shadow_offset_layout.addWidget(self.dialog_text_shadow_offset_x_spin)
+        self.dialog_text_shadow_offset_y_spin = QSpinBox()
+        self.dialog_text_shadow_offset_y_spin.setRange(-20, 20)
+        self.dialog_text_shadow_offset_y_spin.setSingleStep(1)
+        self.dialog_text_shadow_offset_y_spin.setSuffix(" px")
+        shadow_offset_layout.addWidget(QLabel("Y:"))
+        shadow_offset_layout.addWidget(self.dialog_text_shadow_offset_y_spin)
+        shadow_offset_layout.addStretch()
+        shadow_layout.addRow("Shadow Offset:", shadow_offset_layout)
+
+        self.dialog_text_shadow_blur_spin = QSpinBox()
+        self.dialog_text_shadow_blur_spin.setRange(0, 20)
+        self.dialog_text_shadow_blur_spin.setSuffix(" px")
+        shadow_layout.addRow("Shadow Blur:", self.dialog_text_shadow_blur_spin)
+
+        content_layout.addWidget(shadow_group)
+
+        image_group = QGroupBox("Custom Background Image")
+        image_group_layout = self._make_form_layout(image_group)
+
         self.dialog_use_custom_image_check = QCheckBox("Use Custom Dialog Background Image")
-        ui_layout.addRow(self.dialog_use_custom_image_check)
+        image_group_layout.addRow(self.dialog_use_custom_image_check)
 
-        image_layout = QHBoxLayout()
+        image_path_layout = QHBoxLayout()
         self.dialog_image_path_edit = QLineEdit()
         self.dialog_image_path_edit.setPlaceholderText("Path to dialog background image")
-        image_layout.addWidget(self.dialog_image_path_edit)
+        image_path_layout.addWidget(self.dialog_image_path_edit)
         browse_image_btn = QPushButton("Browse")
         browse_image_btn.clicked.connect(lambda: self._browse_file(self.dialog_image_path_edit, "Image Files (*.png *.jpg *.jpeg *.bmp *.gif)"))
-        image_layout.addWidget(browse_image_btn)
-        ui_layout.addRow("Dialog Image:", image_layout)
+        image_path_layout.addWidget(browse_image_btn)
+        image_group_layout.addRow("Image Path:", image_path_layout)
 
         self.dialog_image_opacity_spin = QSpinBox()
         self.dialog_image_opacity_spin.setRange(0, 100)
         self.dialog_image_opacity_spin.setSuffix("%")
-        ui_layout.addRow("Image Opacity:", self.dialog_image_opacity_spin)
+        image_group_layout.addRow("Image Opacity:", self.dialog_image_opacity_spin)
 
-        ui_layout.addRow("", QLabel(""))  
-        ui_layout.addRow("Text Offset Settings:", QLabel(""))
+        content_layout.addWidget(image_group)
+
+        offset_group = QGroupBox("Text Offset")
+        offset_layout = self._make_form_layout(offset_group)
 
         header_offset_layout = QHBoxLayout()
         self.header_offset_x_spin = QSpinBox()
@@ -326,7 +419,7 @@ class SettingsDialog(QDialog):
         header_offset_layout.addWidget(QLabel("Y:"))
         header_offset_layout.addWidget(self.header_offset_y_spin)
         header_offset_layout.addStretch()
-        ui_layout.addRow("Header Offset:", header_offset_layout)
+        offset_layout.addRow("Header Offset:", header_offset_layout)
 
         text_offset_layout = QHBoxLayout()
         self.text_offset_x_spin = QSpinBox()
@@ -342,11 +435,14 @@ class SettingsDialog(QDialog):
         text_offset_layout.addWidget(QLabel("Y:"))
         text_offset_layout.addWidget(self.text_offset_y_spin)
         text_offset_layout.addStretch()
-        ui_layout.addRow("Text Area Offset:", text_offset_layout)
+        offset_layout.addRow("Text Area Offset:", text_offset_layout)
 
-        layout.addWidget(ui_group)
-        
-        layout.addStretch()
+        content_layout.addWidget(offset_group)
+
+        content_layout.addStretch()
+        scroll.setWidget(content_widget)
+        layout.addWidget(scroll)
+
         return widget
 
     def _create_behavior_tab(self) -> QWidget:
@@ -755,6 +851,14 @@ class SettingsDialog(QDialog):
         self.dialog_opacity_spin.setValue(self.config.dialog_opacity)
         self.dialog_font_edit.setText(self.config.dialog_font)
         self.dialog_text_color_edit.setText(self.config.dialog_text_color)
+        self.dialog_text_stroke_enabled_check.setChecked(self.config.dialog_text_stroke_enabled)
+        self.dialog_text_stroke_color_edit.setText(self.config.dialog_text_stroke_color)
+        self.dialog_text_stroke_width_spin.setValue(self.config.dialog_text_stroke_width)
+        self.dialog_text_shadow_enabled_check.setChecked(self.config.dialog_text_shadow_enabled)
+        self.dialog_text_shadow_color_edit.setText(self.config.dialog_text_shadow_color)
+        self.dialog_text_shadow_offset_x_spin.setValue(self.config.dialog_text_shadow_offset_x)
+        self.dialog_text_shadow_offset_y_spin.setValue(self.config.dialog_text_shadow_offset_y)
+        self.dialog_text_shadow_blur_spin.setValue(self.config.dialog_text_shadow_blur)
         self.dialog_use_custom_image_check.setChecked(self.config.get("General", "dialog_use_custom_image", "false").lower() == "true")
         self.dialog_image_path_edit.setText(self.config.get("General", "dialog_image_path", ""))
         self.dialog_image_opacity_spin.setValue(int(self.config.get("General", "dialog_image_opacity", "100")))
@@ -909,7 +1013,7 @@ class SettingsDialog(QDialog):
 
         try:
 
-            self.config.set("General", "CharacterName", self.character_name_edit.text())
+            self.config.set("General", "charactername", self.character_name_edit.text())
             self.config.set("Custom", "Username", self.username_edit.text())
             self.config.set("General", "use_pack_settings", str(self.use_pack_settings_check.isChecked()).lower())
             self.config.set("General", "always_on_top", str(self.always_on_top_check.isChecked()).lower())
@@ -934,6 +1038,14 @@ class SettingsDialog(QDialog):
             self.config.set("General", "dialog_opacity", str(self.dialog_opacity_spin.value()))
             self.config.set("General", "dialog_font", self.dialog_font_edit.text())
             self.config.set("General", "dialog_text_color", self.dialog_text_color_edit.text())
+            self.config.set("General", "dialog_text_stroke_enabled", str(self.dialog_text_stroke_enabled_check.isChecked()).lower())
+            self.config.set("General", "dialog_text_stroke_color", self.dialog_text_stroke_color_edit.text())
+            self.config.set("General", "dialog_text_stroke_width", str(self.dialog_text_stroke_width_spin.value()))
+            self.config.set("General", "dialog_text_shadow_enabled", str(self.dialog_text_shadow_enabled_check.isChecked()).lower())
+            self.config.set("General", "dialog_text_shadow_color", self.dialog_text_shadow_color_edit.text())
+            self.config.set("General", "dialog_text_shadow_offset_x", str(self.dialog_text_shadow_offset_x_spin.value()))
+            self.config.set("General", "dialog_text_shadow_offset_y", str(self.dialog_text_shadow_offset_y_spin.value()))
+            self.config.set("General", "dialog_text_shadow_blur", str(self.dialog_text_shadow_blur_spin.value()))
             self.config.set("General", "dialog_use_custom_image", str(self.dialog_use_custom_image_check.isChecked()).lower())
             self.config.set("General", "dialog_image_path", self.dialog_image_path_edit.text())
             self.config.set("General", "dialog_image_opacity", str(self.dialog_image_opacity_spin.value()))

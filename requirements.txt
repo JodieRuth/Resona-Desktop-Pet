@@ -28,6 +28,9 @@ tencentcloud-sdk-python-ocr>=3.0.0
 mcp>=1.0.0
 websockets==15.0.1
 
+onnxruntime>=1.16.0
+transformers>=4.35.0
+
 python-xlib; sys_platform == 'linux'
 ewmh; sys_platform == 'linux'
 mss; sys_platform == 'linux'

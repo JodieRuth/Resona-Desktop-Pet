@@ -174,7 +174,7 @@ class ConfigManager:
         if self.use_pack_settings:
             val = self.pack_manager.get_info("character", {}).get("name")
             if val: return val
-        return self.get_required("General", "CharacterName")
+        return self.get_required("General", "charactername")
         
     @property
     def default_outfit(self) -> str:
@@ -325,7 +325,70 @@ class ConfigManager:
     @property
     def dialog_text_color(self) -> str:
         return self.get("General", "dialog_text_color", "255,255,255")
-        
+
+    @property
+    def dialog_text_stroke_enabled(self) -> bool:
+        return self.getboolean("General", "dialog_text_stroke_enabled", True)
+
+    @property
+    def dialog_text_stroke_color(self) -> str:
+        return self.get("General", "dialog_text_stroke_color", "0,0,0")
+
+    @property
+    def dialog_text_stroke_width(self) -> int:
+        val = self.getint("General", "dialog_text_stroke_width", 1)
+        return max(0, min(10, val))
+
+    @property
+    def dialog_text_shadow_enabled(self) -> bool:
+        return self.getboolean("General", "dialog_text_shadow_enabled", True)
+
+    @property
+    def dialog_text_shadow_color(self) -> str:
+        return self.get("General", "dialog_text_shadow_color", "0,0,0")
+
+    @property
+    def dialog_text_shadow_offset_x(self) -> int:
+        return self.getint("General", "dialog_text_shadow_offset_x", 1)
+
+    @property
+    def dialog_text_shadow_offset_y(self) -> int:
+        return self.getint("General", "dialog_text_shadow_offset_y", 1)
+
+    @property
+    def dialog_text_shadow_blur(self) -> int:
+        val = self.getint("General", "dialog_text_shadow_blur", 3)
+        return max(0, val)
+
+    @property
+    def dialog_use_custom_image(self) -> bool:
+        return self.getboolean("General", "dialog_use_custom_image", True)
+
+    @property
+    def dialog_image_path(self) -> str:
+        return self.get("General", "dialog_image_path", "resona_desktop_pet/ui/window_resona.png")
+
+    @property
+    def dialog_image_opacity(self) -> int:
+        val = self.getint("General", "dialog_image_opacity", 70)
+        return max(0, min(100, val))
+
+    @property
+    def header_offset_x(self) -> int:
+        return self.getint("General", "header_offset_x", 0)
+
+    @property
+    def header_offset_y(self) -> int:
+        return self.getint("General", "header_offset_y", 22)
+
+    @property
+    def text_offset_x(self) -> int:
+        return self.getint("General", "text_offset_x", 0)
+
+    @property
+    def text_offset_y(self) -> int:
+        return self.getint("General", "text_offset_y", 20)
+
     @property
     def monitor_clipboard(self) -> bool:
         return self.get_bool("Advanced", "monitor_clipboard", True)
@@ -649,6 +712,10 @@ class ConfigManager:
         return self.getint("SoVITS", "top_k", 15)
 
     @property
+    def sovits_tts_language(self) -> str:
+        return self.get("SoVITS", "tts_language", "ja")
+
+    @property
     def sovits_text_split_method(self) -> str:
         return self.get("SoVITS", "text_split_method", "cut5")
 
@@ -700,6 +767,53 @@ class ConfigManager:
     def mcp_max_tool_rounds(self) -> int:
         return self.getint("MCP", "max_tool_rounds", 30)
 
+    @property
+    def mcp_hide_public_prefixes(self) -> str:
+        return self.get("MCP", "hide_public_prefixes", "sts_")
+
+    @property
+    def memory_enabled(self) -> bool:
+        return self.getboolean("Memory", "enabled", True)
+
+    @property
+    def memory_per_pack(self) -> bool:
+        return self.getboolean("Memory", "per_pack_memory", True)
+
+    @property
+    def memory_force_operation(self) -> bool:
+        return self.getboolean("Memory", "force_operation", True)
+
+    @property
+    def memory_startup_processing(self) -> bool:
+        return self.getboolean("Memory", "startup_processing", True)
+
+    @property
+    def memory_startup_base_url(self) -> str:
+        return self.get("Memory", "startup_base_url", "")
+
+    @property
+    def memory_startup_api_key(self) -> str:
+        return self.get("Memory", "startup_api_key", "")
+
+    @property
+    def memory_startup_model_name(self) -> str:
+        return self.get("Memory", "startup_model_name", "deepseek-chat")
+
+    @property
+    def memory_conversation_retention_days(self) -> int:
+        return self.getint("Memory", "conversation_retention_days", 0)
+
+    @property
+    def memory_vector_enabled(self) -> bool:
+        return self.getboolean("Memory", "vector_enabled", False)
+
+    @property
+    def memory_vector_model_path(self) -> str:
+        return self.get("Memory", "vector_model_path", "memory/sentence-transformers")
+
+    @property
+    def memory_vector_model_file(self) -> str:
+        return self.get("Memory", "vector_model_file", "onnx/model_quint8_avx2.onnx")
 
     @property
     def timer_enabled(self) -> bool:

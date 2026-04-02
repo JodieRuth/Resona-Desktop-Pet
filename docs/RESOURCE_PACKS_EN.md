@@ -55,7 +55,38 @@ Resource packs can include Python plugins to extend functionality:
 - **Background Logic**: Execute custom detection logic via `check_status()` function.
 - **Example File**: `system_extension.py`
 
-## 5. How to Customize a Resource Pack
+## 5. Resource Pack Config Override (`override_config.cfg`)
+Resource packs can include an `override_config.cfg` file to override settings from the main `config.cfg`. This allows each character to have independent configurations without modifying global settings.
+
+### 5.1 Usage
+Create an `override_config.cfg` file in the resource pack root directory, using the same format as `config.cfg`:
+
+```ini
+[General]
+always_on_top = true
+idle_opacity = 0.6
+
+[Physics]
+enabled = true
+gravity = 500.0
+
+[Behavior]
+trigger_cooldown = 60.0
+```
+
+### 5.2 Override Rules
+- **Priority**: Pack config > Main config > Default values
+- **Dynamic Switching**: Automatically loads the new pack's override config when switching resource packs
+- **Partial Override**: Only include configuration items that need to be overridden; unspecified items use main config values
+- **Immediate Effect**: Override config takes effect immediately after switching packs
+
+### 5.3 Common Use Cases
+- **Character-Specific Physics**: Enable physics engine with unique gravity parameters for specific characters
+- **Independent Trigger Cooldowns**: Different characters have different trigger frequencies
+- **UI Personalization**: Each character has different opacity, dialog styles, etc.
+- **Feature Toggles**: Enable/disable certain features (like MCP, OCR) for specific characters
+
+## 6. How to Customize a Resource Pack
 1. **Use the Example**: The fastest way is to copy `packs/Example_Pack` and rename the folder.
 2. **Modify pack.json**: Set a unique `id` and update the character name.
 3. **Prepare Sprites**:
@@ -67,7 +98,9 @@ Resource packs can include Python plugins to extend functionality:
 5. **Define Logic**:
    - Write the character's tone and background in `prompts/character_prompt.txt`.
    - Create interactive triggers using `tools/trigger_editor.py`.
-6. **(Optional) Write Plugins**:
+6. **(Optional) Config Override**:
+   - Create `override_config.cfg` to set character-specific configurations.
+7. **(Optional) Write Plugins**:
    - Create Python files in the `plugins/` directory to extend functionality.
 
 ---

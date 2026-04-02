@@ -44,17 +44,36 @@ class MCPManager:
     def has_tools(self) -> bool:
         return bool(self._tools_cache)
 
-    def get_tools(self, public_only: bool = True) -> List[Dict[str, Any]]:
-        if not self.enabled:
+    def get_memory_tools_only(self, pack_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        if not hasattr(self.config, 'memory_enabled') or not self.config.memory_enabled:
             return []
-        if not public_only:
-            return list(self._tools_cache)
-        tools = [t for t in self._tools_cache if "[PRIVATE]" not in t.get("function", {}).get("description", "")]
-        hide_prefixes = self.config.get("MCP", "hide_public_prefixes", "")
-        if hide_prefixes:
-            prefixes = [p.strip() for p in hide_prefixes.split(",") if p.strip()]
-            if prefixes:
-                tools = [t for t in tools if not any(t.get("function", {}).get("name", "").startswith(p) for p in prefixes)]
+        
+        from memory.memory_manager import MemoryManager
+        from pathlib import Path
+        project_root = Path(self.config.config_path).parent
+        memory_manager = MemoryManager(project_root, self.config)
+        
+        target_pack_id = pack_id if pack_id else self.config.pack_manager.active_pack_id
+        return memory_manager.get_memory_tools(target_pack_id)
+
+    def get_tools(self, public_only: bool = True) -> List[Dict[str, Any]]:
+        tools = []
+        
+        memory_tools = self.get_memory_tools_only()
+        tools.extend(memory_tools)
+        
+        if self.enabled:
+            if not public_only:
+                tools.extend(self._tools_cache)
+            else:
+                mcp_tools = [t for t in self._tools_cache if "[PRIVATE]" not in t.get("function", {}).get("description", "")]
+                hide_prefixes = self.config.get("MCP", "hide_public_prefixes", "")
+                if hide_prefixes:
+                    prefixes = [p.strip() for p in hide_prefixes.split(",") if p.strip()]
+                    if prefixes:
+                        mcp_tools = [t for t in mcp_tools if not any(t.get("function", {}).get("name", "").startswith(p) for p in prefixes)]
+                tools.extend(mcp_tools)
+        
         return tools
 
     def get_tool_metadata(self, name: str) -> Dict[str, Any]:
@@ -212,6 +231,44 @@ class MCPManager:
         loop.create_task(self.stop())
 
     async def call_tool(self, name: str, arguments: Dict[str, Any]) -> str:
+        if name.startswith("memory_") and hasattr(self.config, 'memory_enabled') and self.config.memory_enabled:
+            from memory.memory_manager import MemoryManager
+            from pathlib import Path
+            project_root = Path(self.config.config_path).parent
+            memory_manager = MemoryManager(project_root, self.config)
+            
+            pack_id = arguments.get("pack_id", self.config.pack_manager.active_pack_id)
+            session_id = f"session_{pack_id}"
+            
+            try:
+                if name == "memory_store":
+                    content = arguments.get("content", "")
+                    memory_uuid = memory_manager.store_memory(pack_id, content, session_id)
+                    result = {"ok": True, "memory_id": memory_uuid, "content": content, "message": f"Memory stored successfully: {content[:100]}{'...' if len(content) > 100 else ''}"}
+                elif name == "memory_delete":
+                    memory_uuid = arguments.get("uuid", "")
+                    success = memory_manager.delete_memory(pack_id, memory_uuid)
+                    result = {"ok": success, "memory_id": memory_uuid, "message": "Memory deleted successfully" if success else "Memory not found"}
+                elif name == "memory_update":
+                    memory_uuid = arguments.get("uuid", "")
+                    content = arguments.get("content", "")
+                    success = memory_manager.update_memory(pack_id, memory_uuid, content)
+                    result = {"ok": success, "memory_id": memory_uuid, "content": content, "message": f"Memory updated successfully: {content[:100]}{'...' if len(content) > 100 else ''}" if success else "Memory not found"}
+                elif name == "memory_search":
+                    query = arguments.get("query", "")
+                    limit = arguments.get("limit", 5)
+                    results = memory_manager.search_memories(pack_id, query, limit)
+                    result = {"ok": True, "results": results, "count": len(results)}
+                else:
+                    raise RuntimeError(f"Unknown memory tool: {name}")
+                
+                import json
+                return json.dumps(result, ensure_ascii=False)
+            except Exception as e:
+                logger.error(f"[Memory] Error calling tool {name}: {e}")
+                import json
+                return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
+        
         entry = self._tool_index.get(name)
         if not entry:
             raise RuntimeError(f"MCP tool not found: {name}")

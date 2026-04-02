@@ -1,9 +1,7 @@
 import asyncio
 import os
-import tarfile
 import threading
 import wave
-import requests
 from pathlib import Path
 from typing import Optional, Callable
 from dataclasses import dataclass
@@ -47,6 +45,7 @@ class STTBackend:
         return model_dir
 
     def _download_model(self, url: str, target_dir: Path) -> Optional[Path]:
+        import requests
         if not url: return None
         log(f"Downloading STT model from {url}")
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -132,6 +131,7 @@ class STTBackend:
         await asyncio.get_event_loop().run_in_executor(None, self._extract_sync, archive_path, target_dir)
 
     def _extract_sync(self, archive_path: Path, target_dir: Path) -> None:
+        import tarfile
         try:
             log(f"Extracting {archive_path} to {target_dir}...")
             with tarfile.open(archive_path, "r:bz2") as tar: tar.extractall(target_dir)
@@ -177,9 +177,9 @@ class STTBackend:
         self._record_thread.start()
 
     def _record_audio(self, on_complete: Optional[Callable[[STTResult], None]]) -> None:
+        import pyaudio
+        import numpy as np
         try:
-            import pyaudio
-            import numpy as np
             p = pyaudio.PyAudio()
             stream = p.open(format=pyaudio.paInt16, channels=1, rate=self._sample_rate, input=True, frames_per_buffer=1024)
             max_duration = self.config.stt_max_duration

@@ -1,6 +1,6 @@
 from PySide6.QtCore import Qt, QRect, Signal, QEvent, QObject, QTimer
 from PySide6.QtGui import QPainter, QColor, QFont, QKeyEvent, QResizeEvent, QPaintEvent, QFontDatabase, QPixmap
-from PySide6.QtWidgets import QWidget, QTextEdit, QLabel, QFrame
+from PySide6.QtWidgets import QWidget, QTextEdit, QLabel, QFrame, QGraphicsDropShadowEffect
 from typing import Optional
 import os
 from pathlib import Path
@@ -194,6 +194,14 @@ class IOOverlay(QWidget):
         font_scale = 1.0
         config = None
         text_color = "white"
+        stroke_enabled = False
+        stroke_color = "black"
+        stroke_width = 0
+        shadow_enabled = False
+        shadow_color = "black"
+        shadow_offset_x = 0
+        shadow_offset_y = 0
+        shadow_blur = 0
         try:
             if hasattr(self.parent(), 'config'):
                 config = self.parent().config
@@ -206,12 +214,59 @@ class IOOverlay(QWidget):
                 elif tc_str.startswith("#"):
                     text_color = tc_str
 
+                stroke_enabled = config.dialog_text_stroke_enabled
+                if stroke_enabled:
+                    sc_str = config.dialog_text_stroke_color
+                    if "," in sc_str:
+                        sc = self._parse_color(sc_str, 100)
+                        stroke_color = sc.name()
+                    elif sc_str.startswith("#"):
+                        stroke_color = sc_str
+                    stroke_width = config.dialog_text_stroke_width
+
+                shadow_enabled = config.dialog_text_shadow_enabled
+                if shadow_enabled:
+                    shc_str = config.dialog_text_shadow_color
+                    if "," in shc_str:
+                        shc = self._parse_color(shc_str, 100)
+                        shadow_color = shc.name()
+                    elif shc_str.startswith("#"):
+                        shadow_color = shc_str
+                    shadow_offset_x = config.dialog_text_shadow_offset_x
+                    shadow_offset_y = config.dialog_text_shadow_offset_y
+                    shadow_blur = config.dialog_text_shadow_blur
+
         except: pass
 
         style = f"color: {text_color};"
         self.header.setStyleSheet(style)
         self.body.setStyleSheet(style)
         self.edit.setStyleSheet(f"background: transparent; {style}")
+
+        if shadow_enabled and shadow_blur > 0:
+            shadow_color_q = QColor(shadow_color)
+
+            shadow_effect_header = QGraphicsDropShadowEffect(self)
+            shadow_effect_header.setColor(shadow_color_q)
+            shadow_effect_header.setOffset(shadow_offset_x, shadow_offset_y)
+            shadow_effect_header.setBlurRadius(shadow_blur)
+            self.header.setGraphicsEffect(shadow_effect_header)
+
+            shadow_effect_body = QGraphicsDropShadowEffect(self)
+            shadow_effect_body.setColor(shadow_color_q)
+            shadow_effect_body.setOffset(shadow_offset_x, shadow_offset_y)
+            shadow_effect_body.setBlurRadius(shadow_blur)
+            self.body.setGraphicsEffect(shadow_effect_body)
+
+            shadow_effect_edit = QGraphicsDropShadowEffect(self)
+            shadow_effect_edit.setColor(shadow_color_q)
+            shadow_effect_edit.setOffset(shadow_offset_x, shadow_offset_y)
+            shadow_effect_edit.setBlurRadius(shadow_blur)
+            self.edit.setGraphicsEffect(shadow_effect_edit)
+        else:
+            self.header.setGraphicsEffect(None)
+            self.body.setGraphicsEffect(None)
+            self.edit.setGraphicsEffect(None)
 
         target_font_path = None
         if config and config.dialog_font:

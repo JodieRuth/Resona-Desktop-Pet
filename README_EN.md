@@ -64,11 +64,23 @@ To help you better understand and use this project, we have prepared detailed do
 
 - **Deep Interaction**: Connects to cloud or local LLMs to give your pet a unique personality and dialogue capabilities.
 - **Full Voice Support**: High-quality voice output via SoVITS and semi-real-time voice dialogue via STT.
+- **Memory System**: Supports long-term memory storage, including conversation history and vector semantic retrieval, allowing the pet to "remember" past interactions with users.
 - **MCP Extension Support**: Supports Model Context Protocol, allowing LLMs to invoke local tools (file operations, command line, scheduled reminders, etc.) for Agent capabilities.
 - **Web Service Interface**: Built-in FastAPI server supporting WebSocket connections for remote control or Web UI extensions.
 - **Physics Engine (Experimental)**: Built-in simple physics engine supporting gravity, collision, and drag inertia, giving the pet a more tangible presence.
 - **Low-End Friendly**: Can run theoretically without a GPU by using cloud LLMs and setting SoVITS to CPU mode.
 - **Automated Deployment**: Provides a comprehensive installation script that supports one-click configuration of virtual environments. A Runtime environment option is available for beginners.
+
+### 🧠 Memory System
+
+The memory system allows the pet to save and retrieve conversation history with users, enabling more coherent interactions:
+
+- **Conversation Recording**: Automatically saves conversation history between users and the pet, with support for per-pack storage separation.
+- **Vector Retrieval**: Retrieves past conversations based on semantic similarity (requires enabling `vector_enabled` and configuring an ONNX model).
+- **Memory Retention**: Supports configuring conversation retention days with automatic cleanup of expired records.
+- **Soul File**: Can configure `memory/soul.md` as the pet's core memory/personality supplement.
+
+**Configuration**: Configure related options in the `[Memory]` section of `config.cfg`. The memory feature is enabled by default, but vector retrieval requires additional model file downloads.
 
 ## 🛠️ Technical Architecture
 

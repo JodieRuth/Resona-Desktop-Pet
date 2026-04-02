@@ -18,7 +18,7 @@ from PySide6.QtCore import QObject, Signal, QTimer, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from resona_desktop_pet.config import ConfigManager
-from resona_desktop_pet.backend import LLMBackend, TTSBackend, STTBackend, MCPManager
+from resona_desktop_pet.backend import LLMBackend, TTSBackend, MCPManager
 from resona_desktop_pet.backend.sovits_manager import SoVITSManager
 from resona_desktop_pet.ui.luna.main_window import MainWindow
 from resona_desktop_pet.ui.tray_icon import TrayIcon
@@ -28,6 +28,8 @@ if sys.platform == "win32":
 else:
     BehaviorMonitor = None
 from resona_desktop_pet.web_server import WebServerThread, session_manager, ClientSession
+from memory.memory_manager import MemoryManager
+from memory.startup_processor import StartupProcessor
 log_dir = project_root / "logs"
 log_dir.mkdir(exist_ok=True)
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -527,7 +529,15 @@ class ApplicationController(QObject):
             self._start_sovits_async()
         
         self.mcp_manager = MCPManager(self.config)
+        
+        self.memory_manager = None
+        if hasattr(self.config, 'memory_enabled') and self.config.memory_enabled:
+            self.memory_manager = MemoryManager(self.project_root, self.config)
+            log("[Main] Memory manager initialized")
+        
         self.llm_backend = LLMBackend(self.config, log_path=llm_log_file, mcp_manager=self.mcp_manager)
+        if self.memory_manager:
+            self.llm_backend._memory_manager = self.memory_manager
         
         self._current_watchdog_interval = 300000  
         def reset_watchdog():
@@ -536,7 +546,16 @@ class ApplicationController(QObject):
         self.llm_backend.set_on_activity_callback(reset_watchdog)
         
         self.tts_backend = TTSBackend(self.config, sovits_log_path=sovits_log_path)
-        self.stt_backend = STTBackend(self.config)
+        
+        self.stt_backend = None
+        if self.config.stt_enabled:
+            from resona_desktop_pet.backend import get_stt_backend
+            STTBackend = get_stt_backend()
+            self.stt_backend = STTBackend(self.config)
+            log("[Main] STT backend initialized")
+        else:
+            log("[Main] STT backend skipped")
+        
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
         self._loop_thread.start()
@@ -551,6 +570,11 @@ class ApplicationController(QObject):
                 future.result(timeout=self.config.mcp_startup_timeout + 5)
             except Exception as e:
                 log(f"[Main] MCP startup failed: {e}")
+        
+        if hasattr(self.config, 'memory_enabled') and self.config.memory_enabled and self.config.memory_startup_processing:
+            log("[Main] Scheduling startup memory processing...")
+            asyncio.run_coroutine_threadsafe(self._process_startup_memory(), self._loop)
+        
         self.audio_player = AudioPlayer(self)
         self.audio_player.playback_finished.connect(self._on_audio_finished)
         self.main_window = MainWindow(self.config)
@@ -560,6 +584,10 @@ class ApplicationController(QObject):
         self.tray_icon = TrayIcon(self.main_window)
         self.tray_icon.add_menu_action("Replay Last Response", self._replay_last_response)
         self.tray_icon.show()
+        
+        if hasattr(self.config, 'memory_enabled') and self.config.memory_enabled and self.config.memory_startup_processing:
+            log("[Main] Scheduling startup memory processing...")
+            asyncio.run_coroutine_threadsafe(self._process_startup_memory(), self._loop)
 
         self.debug_panel = None
         if self.config.debug_panel:
@@ -733,6 +761,9 @@ class ApplicationController(QObject):
         QTimer.singleShot(1500, lambda: self.llm_response_ready.emit(response))
 
     async def _async_init_stt(self):
+        if not self.stt_backend:
+            log("[Main] STT backend not available, skipping model load.")
+            return
         success = await self.stt_backend.load_model()
         if success:
             log("[Main] STT Model loaded and ready.")
@@ -1026,10 +1057,14 @@ class ApplicationController(QObject):
         
         timeout_sec = float(self.config.stt_max_duration) + 15.0
         try:
-            res = await asyncio.wait_for(
-                asyncio.to_thread(self.stt_backend.recognize_file, file_path),
-                timeout=timeout_sec
-            )
+            if self.stt_backend:
+                res = await asyncio.wait_for(
+                    asyncio.to_thread(self.stt_backend.recognize_file, file_path),
+                    timeout=timeout_sec
+                )
+            else:
+                res = None
+                log("[Web] STT backend not available")
         except asyncio.TimeoutError:
             res = None
             log(f"[Web] handle_web_audio stt timeout after {timeout_sec}s")
@@ -1646,13 +1681,15 @@ class ApplicationController(QObject):
     def _refresh_audio_devices(self):
         log("[Main] Refreshing audio devices...")
         output_success = self.audio_player.refresh_audio_device()
-        input_success = self.stt_backend.refresh_audio_device()
+        input_success = self.stt_backend.refresh_audio_device() if self.stt_backend else True
         if output_success and input_success:
             log("[Main] Audio devices refreshed successfully")
         else:
             log("[Main] Failed to refresh some audio devices")
     def _handle_stt_request(self):
-        if not self._stt_ready: return
+        if not self._stt_ready or not self.stt_backend:
+            log("[STT] STT not ready or not available, ignoring request.")
+            return
         if self.stt_backend.is_recording():
             self.stt_backend.stop_recording()
             return
@@ -1704,6 +1741,15 @@ class ApplicationController(QObject):
                         log(f"[Weather] API error: Status {r.status}")
         except Exception as e:
             log(f"[Weather] Service error: {e}")
+    
+    async def _process_startup_memory(self):
+        """Process startup memory"""
+        try:
+            processor = StartupProcessor(self.project_root, self.config)
+            await processor.process_startup()
+        except Exception as e:
+            log(f"[Main] Error processing startup memory: {e}")
+    
     def _run_loop(self):
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
@@ -1780,7 +1826,8 @@ class ApplicationController(QObject):
         except Exception:
             pass
         try:
-            self.stt_backend.cleanup()
+            if self.stt_backend:
+                self.stt_backend.cleanup()
         except Exception:
             pass
         try:
@@ -1797,6 +1844,26 @@ class ApplicationController(QObject):
             return
         self._cleanup_started = True
 
+        if hasattr(self, 'memory_manager') and self.memory_manager and hasattr(self, 'llm_backend'):
+            try:
+                history = self.llm_backend.history.get_messages()
+                if len(history) >= 2:
+                    user_msg = None
+                    assistant_msg = None
+                    for msg in reversed(history):
+                        if msg['role'] == 'assistant' and not assistant_msg:
+                            assistant_msg = msg['content']
+                        elif msg['role'] == 'user' and not user_msg:
+                            user_msg = msg['content']
+                        if user_msg and assistant_msg:
+                            break
+                    
+                    if user_msg and assistant_msg:
+                        self.memory_manager.save_temp_session(user_msg, assistant_msg)
+                        log("[Main] Temporary session saved for startup processing")
+            except Exception as e:
+                log(f"[Main] Error saving temporary session: {e}")
+
         def _cleanup_task():
             if self._mocker_process:
                 self._mocker_process.terminate()
@@ -1807,7 +1874,8 @@ class ApplicationController(QObject):
                     self.behavior_monitor.terminate()
             if self.sovits_manager:
                 self.sovits_manager.stop()
-            self.stt_backend.cleanup()
+            if self.stt_backend:
+                self.stt_backend.cleanup()
             cleanup_manager.cleanup()
             try:
                 self._loop.call_soon_threadsafe(self._loop.stop)

@@ -593,11 +593,14 @@ class ExternalWSServerThread(threading.Thread):
                             temperature = data.get("temperature", 0.7)
                             top_p = data.get("top_p", 1.0)
                             max_tokens = data.get("max_tokens", 500)
+                            llm_pack_id = session.pack_id if session.pack_id else controller_ref.config.pack_manager.active_pack_id
                             result = await self.controller.llm_backend.query_raw(
                                 messages=messages,
                                 temperature=temperature,
                                 top_p=top_p,
-                                max_tokens=max_tokens
+                                max_tokens=max_tokens,
+                                pack_id=llm_pack_id,
+                                enable_memory=True
                             )
                             await websocket.send(json.dumps({
                                 "type": "llm_response",

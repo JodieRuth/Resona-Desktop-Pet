@@ -20,6 +20,21 @@ Converts text to speech.
 - **Emotion Mapping**: Maps LLM emotion tags (e.g., `<E:smile>`) to specific reference audio (`ref_wav`) and annotation text (`ref_text`) defined in the active pack's `emotions.json`.
 - **Dynamic Loading**: Automatically updates reference assets when switching resource packs without restarting.
 
+### 2.1 Remote TTS Mode (`tts_remote_handler.py`)
+Supports connecting to a remote SoVITS server for distributed speech synthesis.
+- **Server Discovery**: Automatically discovers SoVITS servers on the local network via UDP broadcast.
+- **WebSocket Communication**: Uses WebSocket to establish persistent connections with remote servers, transmitting text in real-time and receiving audio data.
+- **Multi-Pack Support**: Remote servers can load voice models for multiple resource packs simultaneously, with clients able to switch dynamically.
+- **Configuration**: Set `mode = server` in `config.cfg` and configure `server_host` and `server_port`.
+
+```ini
+[SoVITS]
+mode = server              # local=local mode, server=remote mode
+server_auto_discover = true # Whether to auto-discover servers
+server_host = 127.0.0.1    # Remote server address
+server_port = 9876         # Remote server WebSocket port
+```
+
 ## 3. STT Module (`stt_backend.py`)
 Handles speech recognition.
 - **SenseVoice Engine**: Uses the offline SenseVoice model for high-speed and accurate recognition. The `setup.ps1` installation script in this project downloads and uses the SenseVoiceSmall speech recognition model developed and open-sourced by Alibaba Group (FunASR), following the FunASR Model License 1.1. This script uses the ONNX converted version provided by the k2-fsa / sherpa-onnx project.
@@ -30,6 +45,26 @@ Handles speech recognition.
 Manages the SoVITS background process.
 - **Lifecycle Management**: Automatically locates the `GPT-SoVITS` path, starts the API server on launch, and cleans up processes on exit.
 - **Runtime Support**: Supports starting via the project's built-in streamlined runtime environment.
+
+### 4.1 SoVITS Server Mode (`sovits_server.py`)
+Allows SoVITS to run as a standalone server, providing speech synthesis services to multiple clients.
+- **Standalone Operation**: Launched independently via `run_sovits_server.py`, without depending on the main program.
+- **WebSocket Interface**: Provides WebSocket interfaces for remote client connections.
+- **Service Discovery**: Automatically announces service via UDP broadcast (port 19876) for easy client discovery.
+- **Multi-Client Support**: Supports simultaneous connections from multiple clients, each with independent pack switching.
+- **Multi-Pack Management**: Servers can load model weights for multiple resource packs simultaneously, supporting runtime switching.
+
+**Launch Method**:
+```bash
+python run_sovits_server.py
+```
+
+**Configuration** (`config.cfg`):
+```ini
+[SoVITS]
+device = cuda              # Server compute device (cuda/cpu)
+sovits_api_port = 9880     # SoVITS API port
+```
 
 ## 5. MCP Manager (`mcp_manager.py`)
 Responsible for Model Context Protocol service management and tool scheduling.
@@ -62,6 +97,48 @@ Responsible for scheduled task scheduling and management.
 - **Task Queue**: Internally maintains a task queue, supporting persistence of unfinished tasks.
 - **Pre-synthesis Voice**: Can pre-synthesize voice before task trigger for zero-latency reminders.
 - **Configuration**: Configured through the `[Timer]` section in `config.cfg`.
+
+## 9. Long-Term Memory System (`memory/`)
+Located in `memory/`, providing long-term memory capabilities beyond conversation history.
+
+### 9.1 Memory Manager (`memory_manager.py`)
+Core memory management module responsible for memory storage and retrieval.
+- **SQLite Database Storage**: Uses SQLite for persistent storage of memories and conversation history.
+- **Per-Pack Isolation**: Supports memory isolation by resource pack (`per_pack_memory = true`), giving each character independent memory space.
+- **Conversation History Logging**: Automatically records all conversations, supporting time-range queries.
+- **Memory Injection**: Automatically injects relevant memories into the System Prompt before LLM calls.
+
+### 9.2 Vector Store (`vector_store.py`)
+Vector embedding-based semantic memory system supporting similarity search.
+- **ONNX Model Support**: Uses ONNX format sentence embedding models (e.g., sentence-transformers).
+- **Semantic Retrieval**: Encodes memory content as vectors, supporting semantic similarity search.
+- **Optional Enablement**: Enable via `vector_enabled = true`, requires downloading ONNX models to the specified directory.
+- **Model Path Configuration**:
+```ini
+[Memory]
+vector_enabled = true
+vector_model_path = memory/sentence-transformers
+vector_model_file = onnx/model_quint8_avx2.onnx
+```
+
+### 9.3 Startup Processor (`startup_processor.py`)
+Processes previous session memories on program startup.
+- **Session Summarization**: Uses independently configured LLM to analyze previous session content and extract important information.
+- **Memory Conversion**: Converts temporary sessions into long-term memory storage.
+- **Independent Configuration**: Supports using different LLM configurations from the main program for memory processing.
+
+**Memory System Configuration** (`config.cfg`):
+```ini
+[Memory]
+enabled = true                    # Enable long-term memory
+per_pack_memory = true            # Isolate memory by resource pack
+force_operation = true            # Force LLM to use memory tools
+startup_processing = true         # Process previous session on startup
+startup_base_url =                # LLM address for memory processing (empty uses main config)
+startup_api_key =                 # API Key for memory processing
+startup_model_name = deepseek-chat # Model for memory processing
+conversation_retention_days = 30  # Conversation history retention days (0=permanent)
+```
 
 ---
 Parts of this document were generated with the assistance of large language models, and translations were also completed by large language models. Any deviations do not represent the author's true intent.

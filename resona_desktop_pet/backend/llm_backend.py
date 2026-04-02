@@ -5,6 +5,7 @@ import base64
 import io
 import logging
 import sys
+import time
 from datetime import datetime
 from typing import Optional, Callable, Any, List, Dict, Tuple
 from pathlib import Path
@@ -80,6 +81,12 @@ class LLMBackend:
         self.history = ConversationHistory(max_rounds=config.max_rounds)
         self._mcp_manager = mcp_manager
         self._subagent_results: Dict[str, str] = {}
+        
+        self._memory_manager = None
+        if hasattr(config, 'memory_enabled') and config.memory_enabled:
+            from memory.memory_manager import MemoryManager
+            project_root = Path(config.config_path).parent
+            self._memory_manager = MemoryManager(project_root, config)
         
         self._active_model_name = None
         self._active_model_signature = None
@@ -297,7 +304,13 @@ class LLMBackend:
 
     def _build_messages(self, question: str, extra_context: Optional[str] = None, history: Optional[ConversationHistory] = None, pack_id: Optional[str] = None, source: str = "desktop") -> list:
         messages = []
-        system_prompt = self.config.get_prompt(pack_id=pack_id)
+        effective_pack_id = pack_id if pack_id else self.config.pack_manager.active_pack_id
+        system_prompt = self.config.get_prompt(pack_id=effective_pack_id)
+
+        if hasattr(self, '_memory_manager') and self.config.memory_enabled:
+            soul_content = self._memory_manager.get_soul_content(effective_pack_id)
+            if soul_content:
+                system_prompt = f"{system_prompt}\n\n{soul_content}"
 
         context_parts = []
         if self.config.enable_time_context:
@@ -307,6 +320,22 @@ class LLMBackend:
 
         if source == "desktop" and self._mcp_manager and self._mcp_manager.enabled and self._mcp_manager.has_tools():
             system_prompt = f"{system_prompt}\n\n{self._get_mcp_system_instruction()}"
+
+        if hasattr(self, '_memory_manager') and self.config.memory_enabled and self.config.memory_force_operation:
+            memory_instruction = (
+                "\n\n[Memory System Guide]\n"
+                "You have the following memory tools available:\n"
+                "1. memory_search: Search existing memories. Use when the user asks 'what do you remember', 'you said before', or when recalling information is needed.\n"
+                "   - Use query='*' or 'all' to view all memories\n"
+                "   - Use keywords to search for specific information, e.g., query='birthday' or query='favorite color'\n"
+                "2. memory_store: Store new memories. Use when the user tells you important information (preferences, plans, important dates, etc.).\n"
+                "   - Keep content concise and clear, containing key information\n"
+                "   - Example: 'User likes drinking coffee, especially latte'\n"
+                "3. memory_update: Update existing memories. Use when information changes.\n"
+                "4. memory_delete: Delete memories. Use when the user asks to forget certain information.\n\n"
+                "[MANDATORY] After each conversation, if the user provides important information, you MUST use memory_store to save it."
+            )
+            system_prompt = f"{system_prompt}{memory_instruction}"
 
         if self.config.tts_language == "ja":
             ja_tts_instruction = (
@@ -869,9 +898,47 @@ class LLMBackend:
         top_p: float = 1.0,
         max_tokens: int = 500,
         tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None
+        tool_choice: Optional[str] = None,
+        pack_id: Optional[str] = None,
+        enable_memory: bool = True
     ) -> Dict[str, Any]:
         llm_cfg = self.config.get_llm_config()
+        
+        if enable_memory and self.config.memory_enabled and messages:
+            system_msg_idx = -1
+            for i, msg in enumerate(messages):
+                if msg.get("role") == "system":
+                    system_msg_idx = i
+                    break
+            
+            memory_prompt = ""
+            
+            if hasattr(self, '_memory_manager'):
+                soul_content = self._memory_manager.get_soul_content(pack_id)
+                if soul_content:
+                    memory_prompt += f"\n\n{soul_content}"
+            
+            if self.config.memory_force_operation:
+                memory_prompt += (
+                    "\n\n[Memory System Guide]\n"
+                    "You have the following memory tools available:\n"
+                    "1. memory_search: Search existing memories. Use when the user asks 'what do you remember', 'you said before', or when recalling information is needed.\n"
+                    "   - Use query='*' or 'all' to view all memories\n"
+                    "   - Use keywords to search for specific information\n"
+                    "2. memory_store: Store new memories. Use when the user tells you important information.\n"
+                    "3. memory_update: Update existing memories.\n"
+                    "4. memory_delete: Delete memories.\n\n"
+                    "[MANDATORY] After each conversation, if the user provides important information, you MUST use memory_store to save it."
+                )
+            
+            if system_msg_idx >= 0:
+                messages[system_msg_idx]["content"] += memory_prompt
+            else:
+                messages.insert(0, {"role": "system", "content": memory_prompt.strip()})
+            
+            if tools is None and self._mcp_manager:
+                tools = self._mcp_manager.get_memory_tools_only(pack_id)
+        
         self._notify_activity()
         _, raw_text, reasoning, tool_calls = await self._call_litellm_raw(
             messages,
@@ -953,21 +1020,21 @@ class LLMBackend:
             return LLMResponse(error="Tool call exceeded max rounds")
             
         for _ in range(max_tool_rounds):
-            if len(messages) > 10:
-                prefixes = {}
-                for msg in messages:
-                    if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                        for tc in msg["tool_calls"]:
-                            name = tc.get("function", {}).get("name", "")
-                            p = name.split("_")[0] if "_" in name else ""
-                            if p: prefixes[p] = prefixes.get(p, 0) + 1
-                
-                if prefixes:
-                    top_prefix = max(prefixes, key=prefixes.get)
-                    
-                    pattern = f"^{top_prefix}_(?!get_manual).*"
-                    messages = self._prune_mcp_messages(messages, pattern)
-            
+            # if len(messages) > 10:
+            #     prefixes = {}
+            #     for msg in messages:
+            #         if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            #             for tc in msg["tool_calls"]:
+            #                 name = tc.get("function", {}).get("name", "")
+            #                 p = name.split("_")[0] if "_" in name else ""
+            #                 if p: prefixes[p] = prefixes.get(p, 0) + 1
+            #
+            #     if prefixes:
+            #         top_prefix = max(prefixes, key=prefixes.get)
+            #
+            #         pattern = f"^{top_prefix}_(?!get_manual).*"
+            #         messages = self._prune_mcp_messages(messages, pattern)
+
             self._notify_activity()
             _, raw_text, reasoning, tool_calls = await self._call_litellm_raw(
                 messages,
@@ -995,7 +1062,10 @@ class LLMBackend:
                     else:
                         serializable_tool_calls.append(dict(tc))
                 
-                messages.append({"role": "assistant", "content": raw_text or "", "tool_calls": serializable_tool_calls})
+                assistant_msg = {"role": "assistant", "content": raw_text or "", "tool_calls": serializable_tool_calls}
+                if reasoning:
+                    assistant_msg["reasoning_content"] = reasoning
+                messages.append(assistant_msg)
                 for tool_call in tool_calls:
                     call_id, name, arguments = self._normalize_tool_call(tool_call)
                     if not name:
@@ -1156,6 +1226,18 @@ class LLMBackend:
             target_history = history if history is not None else self.history
             target_history.add("user", processed_question)
             target_history.add("assistant", response.raw_response)
+            
+            if self._memory_manager and self.config.memory_enabled:
+                session_id = f"session_{pack_id or 'default'}_{int(time.time())}"
+                self._memory_manager.store_conversation(
+                    pack_id or 'default',
+                    question,  
+                    response.text_display,
+                    session_id
+                )
+
+            if self._memory_manager and self.config.memory_startup_processing:
+                self._memory_manager.save_temp_session(question, response.text_display)
 
         return response
 
@@ -1171,8 +1253,21 @@ class LLMBackend:
             self.reconnect()
 
         try:
-            messages = self._build_messages(question, extra_context=None, history=None, pack_id=pack_id, source="idle_trigger")
+            extra_context_parts = []
+            if self.config.enable_time_context:
+                extra_context_parts.append(f"[Current Time] {self._get_precise_time_context()}")
+            if self.config.enable_ip_context and self._ip_context:
+                extra_context_parts.append(f"[Current IP] {self._ip_context}")
+            extra_context = "\n".join(extra_context_parts) if extra_context_parts else None
+
+            messages = self._build_messages(question, extra_context=extra_context, history=None, pack_id=pack_id, source="idle_trigger")
             processed_question = self._extract_text_content(messages[-1]["content"])
+
+            tools: List[Dict[str, Any]] = []
+            max_tool_rounds = 0
+            if self._mcp_manager and self.config.memory_enabled:
+                tools = self._mcp_manager.get_memory_tools_only(pack_id)
+                max_tool_rounds = 8  
 
             supported_types = {"local", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
             if model_type in supported_types:
@@ -1184,7 +1279,9 @@ class LLMBackend:
                     base_url,
                     temperature=llm_config.get("temperature", 0.7),
                     top_p=llm_config.get("top_p", 1.0),
-                    max_tokens=llm_config.get("max_tokens", 500)
+                    max_tokens=llm_config.get("max_tokens", 500),
+                    tools=tools if tools else None,
+                    max_tool_rounds=max_tool_rounds
                 )
             else:
                 response = LLMResponse(error=f"Unsupported model type: {model_type}")
