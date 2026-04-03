@@ -4,19 +4,20 @@ import sys
 import asyncio
 import aiohttp
 import traceback
-from datetime import datetime
+import logging
 from pathlib import Path
 from typing import Optional, Callable
 from dataclasses import dataclass
+from datetime import datetime
 from ..config import ConfigManager
+
+logger = logging.getLogger("TTS")
+
 @dataclass
 class TTSResult:
     audio_path: Optional[str] = None
     error: Optional[str] = None
     duration: float = 0.0
-def log(message):
-    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    print(f"[{timestamp}] {message}")
 class TTSBackend:
     def __init__(self, config: ConfigManager, sovits_log_path: Optional[Path] = None):
         self.config = config
@@ -33,24 +34,24 @@ class TTSBackend:
         if self._mode == "server":
             from .tts_remote_handler import RemoteTTSHandler
             self._remote_handler = RemoteTTSHandler(config, self._temp_dir)
-            log(f"[TTS] Initialized in server mode: {config.sovits_server_host}:{config.sovits_server_port}")
+            logger.info(f"[TTS] Initialized in server mode: {config.sovits_server_host}:{config.sovits_server_port}")
         else:
-            log(f"[TTS] Initialized in local mode")
+            logger.info(f"[TTS] Initialized in local mode")
     def _load_emotions_config(self, pack_id: Optional[str] = None) -> dict:
         target_pack = pack_id if pack_id else getattr(self.config.pack_manager, "active_pack_id", "")
         json_path = self.config.pack_manager.get_path("logic", "emotions", pack_id=target_pack)
-        print(f"[TTS] Loading emotions config: pack={target_pack} path={json_path}")
+        logger.info(f"[TTS] Loading emotions config: pack={target_pack} path={json_path}")
         if json_path and json_path.exists():
             try:
                 with open(json_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    log(f"[TTS] Loaded {len(data)} emotions from pack {target_pack}.")
+                    logger.info(f"[TTS] Loaded {len(data)} emotions from pack {target_pack}.")
                     self.emotions_cache[target_pack] = data
                     return data
             except Exception as e:
-                log(f"[TTS] CRITICAL: Error loading pack emotions.json: {e}")
+                logger.info(f"[TTS] CRITICAL: Error loading pack emotions.json: {e}")
         else:
-            log(f"[TTS] Emotions config missing: {json_path}")
+            logger.info(f"[TTS] Emotions config missing: {json_path}")
         self.emotions_cache[target_pack] = {}
         return {}
 
@@ -58,7 +59,7 @@ class TTSBackend:
         self.emotions_cache.clear()
         self.emotions_config = self._load_emotions_config()
         active_pack = getattr(self.config.pack_manager, "active_pack_id", "")
-        log(f"[TTS] Emotions config reloaded. pack={active_pack} count={len(self.emotions_config)}")
+        logger.info(f"[TTS] Emotions config reloaded. pack={active_pack} count={len(self.emotions_config)}")
 
     def _get_emotion_config(self, emotion: str, pack_id: Optional[str] = None) -> dict:
         target_pack = pack_id if pack_id else getattr(self.config.pack_manager, "active_pack_id", "")
@@ -68,7 +69,7 @@ class TTSBackend:
         config = self.emotions_cache.get(target_pack, {})
         target = emotion.split("|")[0] if "|" in emotion else emotion
         if target not in config:
-            log(f"[TTS] Warning: Emotion {target} not defined in {target_pack}. Falling back.")
+            logger.info(f"[TTS] Warning: Emotion {target} not defined in {target_pack}. Falling back.")
             target = "<E:smile>"
         return config.get(target, {})
 
@@ -123,26 +124,26 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
     async def synthesize(self, text: str, emotion: str = "<E:smile>", language: Optional[str] = None, pack_id: Optional[str] = None) -> TTSResult:
         if not self.config.sovits_enabled: return TTSResult(error="TTS is disabled")
         text = text.replace("\u30fb", " ")
-        log(f"[TTS] Synthesizing: {text[:30]}... ({emotion}) pack={pack_id}")
+        logger.info(f"[TTS] Synthesizing: {text[:30]}... ({emotion}) pack={pack_id}")
         if self._mode == "server":
             return await self._synthesize_remote(text, emotion, language, pack_id)
         return await self._synthesize_local(text, emotion, language, pack_id)
 
     async def _synthesize_remote(self, text: str, emotion: str, language: Optional[str], pack_id: Optional[str]) -> TTSResult:
-        log(f"[_synthesize_remote] Called with pack_id={pack_id}")
+        logger.info(f"[_synthesize_remote] Called with pack_id={pack_id}")
         if not self._remote_handler:
-            log("[_synthesize_remote] Error: Remote handler not initialized")
+            logger.info("[_synthesize_remote] Error: Remote handler not initialized")
             return TTSResult(error="Remote handler not initialized")
 
         target_pack = pack_id or self.config.pack_manager.get_pack_json_id()
-        log(f"[_synthesize_remote] Target pack: {target_pack}")
+        logger.info(f"[_synthesize_remote] Target pack: {target_pack}")
         
-        log(f"[_synthesize_remote] Calling ensure_connected...")
+        logger.info(f"[_synthesize_remote] Calling ensure_connected...")
         connected = await self._remote_handler.ensure_connected(target_pack)
-        log(f"[_synthesize_remote] ensure_connected returned: {connected}")
+        logger.info(f"[_synthesize_remote] ensure_connected returned: {connected}")
         
         if not connected:
-            log("[_synthesize_remote] Error: Failed to connect to server")
+            logger.info("[_synthesize_remote] Error: Failed to connect to server")
             return TTSResult(error="Failed to connect to server")
 
         emotion_config = self._get_emotion_config(emotion, pack_id=pack_id)
@@ -194,9 +195,9 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                 if ckpt_files and pth_files:
                     gpt_path = str(sorted(ckpt_files)[0].absolute().as_posix())
                     sovits_path = str(sorted(pth_files)[0].absolute().as_posix())
-                    log(f"[TTS] Dynamic model switch detected: {pack_model_dir.name}")
+                    logger.info(f"[TTS] Dynamic model switch detected: {pack_model_dir.name}")
 
-            log(f"[TTS] Using reference audio: {ref_wav_path} with language: {ref_lang} (Prompt: {prompt_lang})")
+            logger.info(f"[TTS] Using reference audio: {ref_wav_path} with language: {ref_lang} (Prompt: {prompt_lang})")
             output_path = os.path.join(self._temp_dir, f"output_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.wav")
             prompt_text = emotion_config.get("ref_text", "")
             prompt_text = prompt_text.replace("\u30fb", " ")
@@ -221,15 +222,15 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                 payload["sovits_path"] = sovits_path
 
             self._log_sovits_params(payload)
-            log(f"[TTS] Sending request to {self.api_url}/tts")
+            logger.info(f"[TTS] Sending request to {self.api_url}/tts")
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
                 async with session.post(f"{self.api_url}/tts", json=payload) as response:
-                    log(f"[TTS] API response status: {response.status}")
+                    logger.info(f"[TTS] API response status: {response.status}")
                     if response.status == 200:
                         audio_data = await response.read()
-                        log(f"[TTS] Received {len(audio_data)} bytes of audio data")
+                        logger.info(f"[TTS] Received {len(audio_data)} bytes of audio data")
                         with open(output_path, "wb") as f: f.write(audio_data)
-                        log(f"[TTS] Audio saved to: {output_path}")
+                        logger.info(f"[TTS] Audio saved to: {output_path}")
                         if os.path.getsize(output_path) == 0: return TTSResult(error="Generated audio is empty")
                         import soundfile as sf
                         import subprocess
@@ -237,7 +238,7 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                             info = sf.info(output_path)
                             data, sr = sf.read(output_path, dtype="float32")
                             duration = len(data) / sr
-                            log(f"[TTS] Audio duration: {duration:.2f}s, sr={sr}Hz, subtype={info.subtype}")
+                            logger.info(f"[TTS] Audio duration: {duration:.2f}s, sr={sr}Hz, subtype={info.subtype}")
                             TARGET_SR = 44100
                             if info.subtype != "PCM_16" or sr != TARGET_SR:
                                 pcm_path = output_path.replace(".wav", "_pcm16.wav")
@@ -251,21 +252,21 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                                     "-sample_fmt", "s16",
                                     pcm_path
                                 ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                                log(f"[TTS] FFmpeg resample exit={result.returncode}, {sr}Hz -> {TARGET_SR}Hz PCM_16 (cmd={ffmpeg_cmd})")
+                                logger.info(f"[TTS] FFmpeg resample exit={result.returncode}, {sr}Hz -> {TARGET_SR}Hz PCM_16 (cmd={ffmpeg_cmd})")
                                 if result.returncode == 0:
                                     output_path = pcm_path
                                 else:
-                                    log(f"[TTS] FFmpeg failed: {result.stderr.decode('utf-8', errors='ignore')[-200:]}")
+                                    logger.info(f"[TTS] FFmpeg failed: {result.stderr.decode('utf-8', errors='ignore')[-200:]}")
                             return TTSResult(audio_path=output_path, duration=duration)
                         except Exception as e:
-                            log(f"[TTS] Failed to read audio duration: {e}")
+                            logger.info(f"[TTS] Failed to read audio duration: {e}")
                             return TTSResult(audio_path=output_path, duration=0.0)
                     else:
                         error_text = await response.text()
-                        log(f"[TTS] API error: {response.status} - {error_text}")
+                        logger.info(f"[TTS] API error: {response.status} - {error_text}")
                         return TTSResult(error=f"API error {response.status}")
         except Exception as e:
-            log(f"[TTS] Synthesis failed: {e}")
+            logger.info(f"[TTS] Synthesis failed: {e}")
             traceback.print_exc()
             return TTSResult(error=str(e))
     async def synthesize_fallback(self, text: str, emotion: str = "<E:smile>") -> TTSResult:

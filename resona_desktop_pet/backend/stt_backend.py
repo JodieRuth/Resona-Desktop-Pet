@@ -2,20 +2,20 @@ import asyncio
 import os
 import threading
 import wave
+import logging
 from pathlib import Path
 from typing import Optional, Callable
 from dataclasses import dataclass
 from ..config import ConfigManager
 from ..cleanup_manager import register_cleanup
+
+logger = logging.getLogger("STT")
+
 @dataclass
 class STTResult:
     text: str = ""
     error: Optional[str] = None
     duration: float = 0.0
-def log(message):
-    from datetime import datetime
-    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    print(f"[{timestamp}] [STT] {message}")
 class STTBackend:
     def __init__(self, config: ConfigManager):
         self.config = config
@@ -31,7 +31,7 @@ class STTBackend:
         self._hotkey_registered = False
         self._loaded_language = None
         register_cleanup(self.cleanup)
-        log("STTBackend initialized (Model not loaded yet)")
+        logger.info("STTBackend initialized (Model not loaded yet)")
 
     def _get_model_path(self) -> Path:
         model_dir = self.project_root / self.config.stt_model_dir
@@ -47,7 +47,7 @@ class STTBackend:
     def _download_model(self, url: str, target_dir: Path) -> Optional[Path]:
         import requests
         if not url: return None
-        log(f"Downloading STT model from {url}")
+        logger.info(f"Downloading STT model from {url}")
         target_dir.mkdir(parents=True, exist_ok=True)
         filename = url.split("/")[-1]
         target_path = target_dir / filename
@@ -57,10 +57,10 @@ class STTBackend:
             with open(target_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk: f.write(chunk)
-            log(f"Download complete: {target_path}")
+            logger.info(f"Download complete: {target_path}")
             return target_path
         except Exception as e:
-            log(f"Download failed: {e}")
+            logger.info(f"Download failed: {e}")
             if target_path.exists(): target_path.unlink()
             return None
 
@@ -73,10 +73,10 @@ class STTBackend:
             return True
 
         if not self.config.stt_enabled: 
-            log("STT is disabled in config")
+            logger.info("STT is disabled in config")
             return False
         model_dir = self._get_model_path()
-        log(f"Checking model in: {model_dir}")
+        logger.info(f"Checking model in: {model_dir}")
         base_dir = self.project_root / self.config.stt_model_dir
         has_model = False
         if model_dir.exists():
@@ -84,22 +84,22 @@ class STTBackend:
                 has_model = True
                 break
         if not has_model:
-            log("Model files not found, checking for archives...")
+            logger.info("Model files not found, checking for archives...")
             archive_found = False
             for archive in base_dir.iterdir() if base_dir.exists() else []:
                 if archive.suffix in [".bz2", ".tar.gz", ".zip"]:
-                    log(f"Found archive: {archive.name}, extracting...")
+                    logger.info(f"Found archive: {archive.name}, extracting...")
                     await self._extract_model(archive, base_dir)
                     archive_found = True
                     break
             if not archive_found and self.config.stt_download_url:
-                log("No model or archive found, attempting download...")
+                logger.info("No model or archive found, attempting download...")
                 archive_path = await asyncio.to_thread(self._download_model, self.config.stt_download_url, base_dir)
                 if archive_path: await self._extract_model(archive_path, base_dir)
             model_dir = self._get_model_path()
-            log(f"Final model search path: {model_dir}")
+            logger.info(f"Final model search path: {model_dir}")
         if not model_dir.exists(): 
-            log(f"CRITICAL: Model directory {model_dir} does not exist.")
+            logger.info(f"CRITICAL: Model directory {model_dir} does not exist.")
             return False
         try:
             import sherpa_onnx
@@ -108,9 +108,9 @@ class STTBackend:
                 if f.name.endswith(".onnx"): model_file = f
                 elif f.name == "tokens.txt": tokens_file = f
             if not model_file or not tokens_file: 
-                log(f"CRITICAL: Missing files in {model_dir}. Need .onnx and tokens.txt")
+                logger.info(f"CRITICAL: Missing files in {model_dir}. Need .onnx and tokens.txt")
                 return False
-            log(f"Loading SenseVoice model: {model_file.name} (Lang: {current_lang or 'auto'})")
+            logger.info(f"Loading SenseVoice model: {model_file.name} (Lang: {current_lang or 'auto'})")
             self._recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
                 model=str(model_file.absolute()), 
                 tokens=str(tokens_file.absolute()), 
@@ -121,10 +121,10 @@ class STTBackend:
             )
             self._model_loaded = True
             self._loaded_language = current_lang
-            log("SenseVoice model loaded successfully.")
+            logger.info("SenseVoice model loaded successfully.")
             return True
         except Exception as e: 
-            log(f"Failed to initialize sherpa-onnx: {e}")
+            logger.info(f"Failed to initialize sherpa-onnx: {e}")
             return False
 
     async def _extract_model(self, archive_path: Path, target_dir: Path) -> None:
@@ -133,23 +133,23 @@ class STTBackend:
     def _extract_sync(self, archive_path: Path, target_dir: Path) -> None:
         import tarfile
         try:
-            log(f"Extracting {archive_path} to {target_dir}...")
+            logger.info(f"Extracting {archive_path} to {target_dir}...")
             with tarfile.open(archive_path, "r:bz2") as tar: tar.extractall(target_dir)
-            log("Extraction complete.")
+            logger.info("Extraction complete.")
         except Exception as e:
-            log(f"Extraction failed: {e}")
+            logger.info(f"Extraction failed: {e}")
 
     def register_hotkey(self, callback: Callable[[], None]) -> bool:
         if self._hotkey_registered: return True
         try:
             import keyboard
-            log(f"Registering STT hotkey: {self.config.stt_hotkey}")
+            logger.info(f"Registering STT hotkey: {self.config.stt_hotkey}")
             keyboard.add_hotkey(self.config.stt_hotkey, callback)
             self._hotkey_registered = True
-            log("STT hotkey registered successfully.")
+            logger.info("STT hotkey registered successfully.")
             return True
         except Exception as e:
-            log(f"Failed to register STT hotkey: {e}")
+            logger.info(f"Failed to register STT hotkey: {e}")
             return False
 
     def unregister_hotkey(self) -> None:
@@ -186,7 +186,7 @@ class STTBackend:
             silence_timeout = self.config.stt_silence_threshold
             max_frames = int(max_duration * self._sample_rate / 1024)
             silence_threshold_frames = int(silence_timeout * self._sample_rate / 1024)
-            log(f"Recording started (Max: {max_duration}s, Silence Timeout: {silence_timeout}s)")
+            logger.info(f"Recording started (Max: {max_duration}s, Silence Timeout: {silence_timeout}s)")
             frames_recorded, silence_frames = 0, 0
             VOL_THRESHOLD = 20
             MIN_DURATION = 2.0
@@ -199,7 +199,7 @@ class STTBackend:
                     silence_frames += 1
                     if silence_frames >= silence_threshold_frames:
                         if frames_recorded * 1024 / self._sample_rate > MIN_DURATION:
-                            log("Silence detected, stopping recording.")
+                            logger.info("Silence detected, stopping recording.")
                             break
                 else:
                     silence_frames = 0
@@ -208,18 +208,18 @@ class STTBackend:
             stream.close()
             p.terminate()
             self._is_recording = False
-            log("Recording finished. Recognizing...")
+            logger.info("Recording finished. Recognizing...")
             result = self._recognize_audio()
             if on_complete: on_complete(result)
         except Exception as e:
             self._is_recording = False
-            log(f"Recording error: {e}")
+            logger.info(f"Recording error: {e}")
             if on_complete: on_complete(STTResult(error=str(e)))
 
     def recognize_file(self, file_path: str) -> STTResult:
         import numpy as np
         import wave
-        log(f"recognize_file start path={file_path}")
+        logger.info(f"recognize_file start path={file_path}")
         
         if not self._model_loaded:
              try:
@@ -254,11 +254,11 @@ class STTBackend:
             stream.accept_waveform(16000, samples)
             self._recognizer.decode_stream(stream)
             text = stream.result.text.strip()
-            log(f"recognize_file done text_len={len(text)}")
+            logger.info(f"recognize_file done text_len={len(text)}")
             return STTResult(text=text)
 
         except Exception as e:
-            log(f"File recognition error: {e}")
+            logger.info(f"File recognition error: {e}")
             return STTResult(error=str(e))
 
     def _recognize_audio(self) -> STTResult:
@@ -272,7 +272,7 @@ class STTBackend:
                 return STTResult(error="Audio buffer empty")
 
             max_vol = np.max(np.abs(audio_float))
-            log(f"Recognizing audio: {len(audio_float)/self._sample_rate:.2f}s, Max Vol: {max_vol:.4f}")
+            logger.info(f"Recognizing audio: {len(audio_float)/self._sample_rate:.2f}s, Max Vol: {max_vol:.4f}")
 
             stream = self._recognizer.create_stream()
             stream.accept_waveform(self._sample_rate, audio_float)
@@ -281,7 +281,7 @@ class STTBackend:
             text = stream.result.text.strip()
             return STTResult(text=text, duration=len(audio_float) / self._sample_rate)
         except Exception as e:
-            log(f"Recognition error: {e}")
+            logger.info(f"Recognition error: {e}")
             return STTResult(error=str(e))
 
     def stop_recording(self) -> None: self._is_recording = False
@@ -294,8 +294,8 @@ class STTBackend:
                 self.stop_recording()
                 if self._record_thread and self._record_thread.is_alive():
                     self._record_thread.join(timeout=2.0)
-            log("[STT] Audio input device refreshed to system default")
+            logger.info("[STT] Audio input device refreshed to system default")
             return True
         except Exception as e:
-            log(f"[STT] Failed to refresh audio device: {e}")
+            logger.info(f"[STT] Failed to refresh audio device: {e}")
             return False

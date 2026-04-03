@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from PySide6.QtCore import QThread, Signal
+
+logger = logging.getLogger("Behavior")
 class WindowInfo:
     def __init__(self, hwnd, pid, title, process_name, rect, url=None):
         self.hwnd = hwnd; self.pid = pid; self.title = title
@@ -41,7 +43,7 @@ class BehaviorMonitor(QThread):
 
     def on_file_dropped(self, file_info: dict):
         self.dropped_file_cache = file_info
-        logging.info(f"[Behavior] 文件拖入: name={file_info.get('name')}, ext={file_info.get('ext')}")
+        logger.info(f"[Behavior] File dropped: name={file_info.get('name')}, ext={file_info.get('ext')}")
 
     def _poll_plugins(self):
         pm = self.config.pack_manager
@@ -65,25 +67,25 @@ class BehaviorMonitor(QThread):
                     prev_status = getattr(self, '_prev_plugin_status', {}).get(pid)
                     if prev_status != result or (current_time - self._last_plugin_log_time) > 60:
                         if result[0]:
-                            logging.info(f"[Behavior] 插件状态: {pid} = {result[1]}")
+                            logger.info(f"[Behavior] Plugin status: {pid} = {result[1]}")
                         self._prev_plugin_status = {**getattr(self, '_prev_plugin_status', {}), pid: result}
                         self._last_plugin_log_time = current_time
             except Exception as e:
-                logging.error(f"[Behavior] Plugin {pid} check failed: {e}")
+                logger.error(f"[Behavior] Plugin {pid} check failed: {e}")
                 self.plugin_status_cache[pid] = (False, "error", 0.0)
 
     def load_triggers(self):
         trigger_path = self.config.pack_manager.get_path("logic", "triggers")
-        logging.info(f"[Behavior] Loading triggers from: {trigger_path}")
+        logger.info(f"[Behavior] Loading triggers from: {trigger_path}")
         if trigger_path and trigger_path.exists():
             try:
                 with open(trigger_path, "r", encoding="utf-8") as f:
                     self.triggers = json.load(f)
-                logging.info(f"[Behavior] Loaded {len(self.triggers)} triggers from pack.")
+                logger.info(f"[Behavior] Loaded {len(self.triggers)} triggers from pack.")
             except Exception as e:
-                logging.error(f"[Behavior] Load failed: {e}")
+                logger.error(f"[Behavior] Load failed: {e}")
         else:
-            logging.error(f"[Behavior] Trigger path missing or not found: {trigger_path}")
+            logger.error(f"[Behavior] Trigger path missing or not found: {trigger_path}")
     def stop(self):
         self.running = False
     def run(self):
@@ -93,7 +95,7 @@ class BehaviorMonitor(QThread):
                     self._perform_checks(is_startup=self.is_first_run)
                     self.is_first_run = False
             except Exception as e:
-                logging.error(f"[Behavior] Loop error: {e}")
+                logger.error(f"[Behavior] Loop error: {e}")
             time.sleep(self.config.behavior_interval)
     def _perform_checks(self, is_startup=False):
         now = time.time()
@@ -107,7 +109,7 @@ class BehaviorMonitor(QThread):
                         m = json.load(f)
 
                     if m == self._last_mock_data:
-                        logging.debug("[Behavior] Mock 数据无变化，跳过检查")
+                        logger.debug("[Behavior] Mock data unchanged, skipping check")
                         return
 
                     is_fs = m.get("is_fullscreen", False)
@@ -136,7 +138,7 @@ class BehaviorMonitor(QThread):
                     hw_stats = {"cpu_temp": m.get("cpu_temp"), "gpu_temp": m.get("gpu_temp"), "cpu_usage": m.get("cpu_usage"), "gpu_usage": m.get("gpu_usage")}
                     win_info = WindowInfo(0, 0, m.get("win_title"), m.get("win_pname"), (0,0,0,0), m.get("win_url"))
 
-                    logging.debug(f"[Behavior] 使用 mock 数据检查: plugins={m.get('plugins', {})}")
+                    logger.debug(f"[Behavior] Using mock data check: plugins={m.get('plugins', {})}")
                     
                     mock_uptime = m.get("process_uptime")
                     mock_battery = m.get("battery", {})
@@ -150,10 +152,10 @@ class BehaviorMonitor(QThread):
                     if "plugins" in m:
                         for pid, vals in m["plugins"].items():
                             self.plugin_status_cache[pid] = tuple(vals)
-                            logging.debug(f"[Behavior] Mock 插件状态: {pid} = {vals}")
+                            logger.debug(f"[Behavior] Mock plugin status: {pid} = {vals}")
                     return
                 except Exception as e:
-                    logging.error(f"[Behavior] Mock 数据读取失败: {e}")
+                    logger.error(f"[Behavior] Mock data read failed: {e}")
 
         try:
             current_pids = {}
@@ -185,7 +187,7 @@ class BehaviorMonitor(QThread):
             self.last_clip_text = curr_clip
             self.last_music_title = curr_music
         except Exception as e:
-            logging.error(f"[Behavior] Check failed: {e}")
+            logger.error(f"[Behavior] Check failed: {e}")
     def _process_rule_matching(self, now, win, idle, hw, clip, weather, is_startup, m_date=None, m_time=None, clip_changed="", music_title="", music_changed="", mock_uptime=None, mock_battery=None, mock_file_drop=None):
         is_debug = self.config.debug_trigger
         is_recovering = (idle < 1.0 and self.last_cycle_idle > 1.0)
@@ -203,7 +205,7 @@ class BehaviorMonitor(QThread):
             matched = self._check_recursive_logic(rule, win, idle, recovery_duration, hw, ui, clip, weather, rule_id, m_date, m_time, clip_changed, music_title, music_changed, mock_uptime=mock_uptime, mock_battery=mock_battery, mock_file_drop=mock_file_drop)
             if matched:
                 if not is_debug and random.random() > rule.get("probability", 1.0): continue
-                logging.info(f"[Behavior] Trigger Matched: {rule_id}")
+                logger.info(f"[Behavior] Trigger Matched: {rule_id}")
                 self.global_history[gid] = now
                 self._last_any_trigger_time = now
                 self.trigger_counts[gid] = self.trigger_counts.get(gid, 0) + 1
@@ -299,18 +301,7 @@ class BehaviorMonitor(QThread):
 
                     res = status[0]
                 if res:
-                    logging.info(f"[Behavior] 插件触发: {t} -> {pid}, status={status}")
-            else:
-                res = False
-        elif t == "is_machine_explosion":
-
-            plugin_map = getattr(self.config.pack_manager, 'plugin_trigger_map', {})
-            pid = plugin_map.get(t)
-            if pid in self.plugin_status_cache:
-                status = self.plugin_status_cache[pid]
-                res = status[0]
-                if res:
-                    logging.info(f"[Behavior] 检测到机器爆炸: {status}")
+                    logger.info(f"[Behavior] Plugin triggered: {t} -> {pid}, status={status}")
             else:
                 res = False
         elif t == "date_match":
@@ -336,7 +327,7 @@ class BehaviorMonitor(QThread):
                 else:
                     res = uptime > gt
                 if res and c.get("log", False):
-                    logging.info(f"[Behavior] Mock进程存活: {pname} 已运行 {uptime}s")
+                    logger.info(f"[Behavior] Mock process uptime: {pname} running for {uptime}s")
             else:
                 targets = [pid for pid, info in self.pid_history.items() if info["name"].lower() == pname.lower()]
                 if targets:
@@ -348,7 +339,7 @@ class BehaviorMonitor(QThread):
                     else:
                         res = uptime > gt
                     if res and c.get("log", False):
-                        logging.info(f"[Behavior] 进程存活: {pname} 已运行 {uptime:.1f}s")
+                        logger.info(f"[Behavior] Process uptime: {pname} running for {uptime:.1f}s")
                 else:
                     res = False
         elif t == "battery_level":
@@ -374,7 +365,7 @@ class BehaviorMonitor(QThread):
                     else:
                         res = True
                 if res and c.get("log", False):
-                    logging.info(f"[Behavior] Mock电池: {percent}%, 充电中={charging}")
+                    logger.info(f"[Behavior] Mock battery: {percent}%, charging={charging}")
             else:
                 try:
                     import psutil
@@ -400,7 +391,7 @@ class BehaviorMonitor(QThread):
                             else:
                                 res = True
                         if res and c.get("log", False):
-                            logging.info(f"[Behavior] 电池: {percent}%, 充电中={charging}")
+                            logger.info(f"[Behavior] Battery: {percent}%, charging={charging}")
                     else:
                         res = False
                 except: res = False
@@ -414,7 +405,7 @@ class BehaviorMonitor(QThread):
                 name_match = not name_keywords or any(kw in file_name.lower() for kw in name_keywords)
                 res = ext_match and name_match
                 if res and c.get("log", False):
-                    logging.info(f"[Behavior] Mock文件拖入匹配: {file_name}")
+                    logger.info(f"[Behavior] Mock file drop matched: {file_name}")
             elif self.dropped_file_cache:
                 file_ext = self.dropped_file_cache.get("ext", "")
                 file_name = self.dropped_file_cache.get("name", "")
@@ -424,7 +415,7 @@ class BehaviorMonitor(QThread):
                 name_match = not name_keywords or any(kw in file_name.lower() for kw in name_keywords)
                 res = ext_match and name_match
                 if res and c.get("log", False):
-                    logging.info(f"[Behavior] 文件拖入匹配: {file_name}")
+                    logger.info(f"[Behavior] File drop matched: {file_name}")
             else:
                 res = False
         return res, pids
@@ -440,12 +431,12 @@ class BehaviorMonitor(QThread):
         try:
             ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         except (OverflowError, ValueError) as e:
-            logging.warning(f"[Behavior] GetWindowThreadProcessId 失败: {e}")
+            logger.warning(f"[Behavior] GetWindowThreadProcessId failed: {e}")
             return None
         try:
             p = psutil.Process(pid.value); pname = p.name().lower()
         except (psutil.NoSuchProcess, psutil.AccessDenied, OverflowError) as e:
-            logging.warning(f"[Behavior] Process 查询失败: {e}")
+            logger.warning(f"[Behavior] Process query failed: {e}")
             return None
         try:
             length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
@@ -463,7 +454,7 @@ class BehaviorMonitor(QThread):
                     if not getattr(auto.Logger, "_redirected", False):
                         def _log_redirect(msg, color=None, writeToFile=False):
                             if msg:
-                                logging.info(f"[UIAutomation] {msg.strip()}")
+                                logger.info(f"[UIAutomation] {msg.strip()}")
                         auto.Logger.Write = _log_redirect
                         auto.Logger._redirected = True
 

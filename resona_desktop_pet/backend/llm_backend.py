@@ -6,10 +6,10 @@ import io
 import logging
 import sys
 import time
-from datetime import datetime
 from typing import Optional, Callable, Any, List, Dict, Tuple
 from pathlib import Path
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import requests
 import psutil
@@ -68,9 +68,8 @@ class ConversationHistory:
         self.history.clear()
 
 
-def log(message):
-    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    print(f"[{timestamp}] [LLM] {message}")
+logger = logging.getLogger("LLM-Detail")  # Detailed logs (prompts, responses)
+logger_info = logging.getLogger("LLM-Info")  # Summary logs (tool calls, token usage)
 
 
 class LLMBackend:
@@ -135,11 +134,11 @@ class LLMBackend:
                     new_ip_context = f"{ip} ({country}, {region}, {city}, ISP: {isp})"
                     if self._ip_context != new_ip_context:
                         self._ip_context = new_ip_context
-                        print(f"[LLM] IP Context initialized: {self._ip_context}")
+                        logger_info.info(f"[LLM] IP Context initialized: {self._ip_context}")
                 else:
-                    print(f"[LLM] IP-API error: {data.get('message')}")
+                    logger_info.info(f"[LLM] IP-API error: {data.get('message')}")
         except Exception as e:
-            print(f"[LLM] Failed to fetch IP context: {e}")
+            logger_info.info(f"[LLM] Failed to fetch IP context: {e}")
 
     def reconnect(self):
         llm_cfg = self.config.get_llm_config()
@@ -152,27 +151,27 @@ class LLMBackend:
         if new_signature == self._active_model_signature:
             return
 
-        print(f"[LLM] Initializing LLM session for: {model_name}")
+        logger_info.info(f"[LLM] Initializing LLM session for: {model_name}")
         self._active_model_name = model_name
         self._active_model_signature = new_signature
-        print(f"[LLM] Client metadata initialized.")
+        logger_info.info(f"[LLM] Client metadata initialized.")
 
     def _get_precise_time_context(self) -> str:
         now = datetime.now()
-        weekday_map = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        weekday_map = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         time_str = now.strftime("%Y-%m-%d %H:%M:%S")
         weekday = weekday_map[now.weekday()]
-        
+
         hour = now.hour
-        if 0 <= hour < 5: period = "深夜"
-        elif 5 <= hour < 8: period = "凌晨"
-        elif 8 <= hour < 11: period = "早上"
-        elif 11 <= hour < 13: period = "中午"
-        elif 13 <= hour < 17: period = "下午"
-        elif 17 <= hour < 19: period = "傍晚"
-        elif 19 <= hour < 23: period = "晚上"
-        else: period = "深夜"
-        
+        if 0 <= hour < 5: period = "late night"
+        elif 5 <= hour < 8: period = "early morning"
+        elif 8 <= hour < 11: period = "morning"
+        elif 11 <= hour < 13: period = "noon"
+        elif 13 <= hour < 17: period = "afternoon"
+        elif 17 <= hour < 19: period = "evening"
+        elif 19 <= hour < 23: period = "night"
+        else: period = "late night"
+
         return f"{time_str} ({weekday}, {period})"
 
     def _get_mcp_system_instruction(self) -> str:
@@ -215,7 +214,7 @@ class LLMBackend:
         elif len(messages) > 2:
             new_messages.append(messages[-1])
         
-        log(f"[SubAgent] Aggressive pruning: {len(messages)} -> {len(new_messages)} messages.")
+        logger.info(f"[SubAgent] Aggressive pruning: {len(messages)} -> {len(new_messages)} messages.")
         return new_messages
 
     async def _run_subagent(
@@ -227,7 +226,7 @@ class LLMBackend:
         if not self._mcp_manager:
             return "SubAgent error: MCP manager not available."
         
-        log(f"[SubAgent] Initializing delegation: {tool_name}")
+        logger.info(f"[SubAgent] Initializing delegation: {tool_name}")
         
         mode = "battle" if "battle" in tool_name else "turn"
         
@@ -236,7 +235,7 @@ class LLMBackend:
             
         try:
             res = await self._mcp_manager.call_tool(tool_name, {"question": user_question})
-            log(f"[SubAgent] Call tool result: {res}")
+            logger.info(f"[SubAgent] Call tool result: {res}")
             
             if not res or not res.strip():
                  return f"SubAgent error: MCP tool '{tool_name}' returned empty result."
@@ -248,7 +247,7 @@ class LLMBackend:
                 res_data = {"status": "ok", "message": res}
             
             if isinstance(res_data, dict) and res_data.get("status") == "delegate":
-                log(f"[SubAgent] Waiting for Java Mod to finish {mode}...")
+                logger.info(f"[SubAgent] Waiting for Java Mod to finish {mode}...")
                 
 
                 timeout = 600 
@@ -260,7 +259,7 @@ class LLMBackend:
                     await asyncio.sleep(0.5)
                 
                 report = self._subagent_results.pop(mode)
-                log(f"[SubAgent] Received result from Java Mod: {report[:100]}...")
+                logger.info(f"[SubAgent] Received result from Java Mod: {report[:100]}...")
                 return report
             elif isinstance(res_data, dict) and res_data.get("status") == "error":
                 return f"SubAgent delegation failed: {res_data.get('message', 'Unknown error')}"
@@ -268,7 +267,7 @@ class LLMBackend:
                 return str(res)
         except Exception as e:
             import traceback
-            log(f"[SubAgent] Fatal Error: {traceback.format_exc()}")
+            logger.info(f"[SubAgent] Fatal Error: {traceback.format_exc()}")
             return f"SubAgent delegation error: {e}"
 
     def _extract_tool_calls(self, response: Any) -> List[Any]:
@@ -595,7 +594,7 @@ class LLMBackend:
                     else:
                         blocks.append(f"OCR Result:\n{ocr_text}")
             except Exception as e:
-                print(f"[LLM] OCR Context Error: {e}")
+                logger.info(f"[LLM] OCR Context Error: {e}")
 
         if process_active:
             try:
@@ -617,7 +616,7 @@ class LLMBackend:
 
     def _parse_response(self, text: str) -> LLMResponse:
         response = LLMResponse(raw_response=text)
-        log(f"Raw response from API: {text}")
+        logger.info(f"Raw response from API: {text}")
 
         json_str = text.strip()
         if "```" in json_str:
@@ -637,14 +636,12 @@ class LLMBackend:
             response.text_tts = data.get("text_tts", response.text_display)
             return response
         except json.JSONDecodeError as e:
-            log(f"JSON Parse Error: {e} | Candidate: {json_str}")
+            logger.info(f"JSON Parse Error: {e} | Candidate: {json_str}")
             response.error = f"JSON parsing failed: {str(e)}"
             return response
 
     def _log_interaction(self, request_data: Any, response_raw: str, usage_stats: Optional[Tuple[Optional[int], Optional[int], Optional[int], Optional[int]]] = None):
-        import logging
         import copy
-        llm_logger = logging.getLogger("LLM")
 
         if not self.log_path: return
 
@@ -759,9 +756,8 @@ class LLMBackend:
                     if len(usage_lines) > 1:
                         f.write("\n".join(usage_lines) + "\n")
 
-            # llm_logger.info(f"Interaction logged to {self.log_path.name}")
         except Exception as e:
-            print(f"[LLM] Logging error: {e}")
+            logger.info(f"[LLM] Logging error: {e}")
 
     def _extract_usage_stats(self, response: Any) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
         usage = None
@@ -807,7 +803,7 @@ class LLMBackend:
     ) -> Tuple[Any, str, str, List[Any]]:
         resolved_model = self._normalize_model_name(model_type, model_name)
         if "gemini-3" in resolved_model.lower() and temperature < 1.0:
-            print(f"[LLM] Overriding temperature for {resolved_model}: {temperature} -> 1.0 (Required for Gemini 3)")
+            logger_info.info(f"[LLM] Overriding temperature for {resolved_model}: {temperature} -> 1.0 (Required for Gemini 3)")
             temperature = 1.0
         request_payload = {
             "model": resolved_model,
@@ -823,8 +819,7 @@ class LLMBackend:
             if tool_choice:
                 request_payload["tool_choice"] = tool_choice
         
-        # self._log_interaction(request_payload, "WAITING...")
-        print(f"[LLM] Sending to {resolved_model}")
+        logger_info.info(f"[LLM] Sending request to {resolved_model}")
         response = await acompletion(
             model=resolved_model,
             messages=messages,
@@ -838,9 +833,9 @@ class LLMBackend:
         )
         prompt_tokens, completion_tokens, total_tokens, cached_tokens = self._extract_usage_stats(response)
         if prompt_tokens is not None or completion_tokens is not None or total_tokens is not None or cached_tokens is not None:
-            log(f"Token usage: prompt={prompt_tokens} completion={completion_tokens} total={total_tokens} cached={cached_tokens}")
+            logger_info.info(f"Token usage: prompt={prompt_tokens} completion={completion_tokens} total={total_tokens} cached={cached_tokens}")
         else:
-            log("Token usage: unavailable")
+            logger_info.info("Token usage: unavailable")
         raw_text, reasoning = self._extract_litellm_message(response)
         for tag in ["think", "thinking"]:
             if f"<{tag}>" in raw_text:
@@ -997,7 +992,7 @@ class LLMBackend:
             return messages
             
         new_messages = [msg for i, msg in enumerate(messages) if i not in indices_to_remove]
-        log(f"[LLM] Pruned {len(indices_to_remove)} old messages from context using pattern '{pattern}'.")
+        logger.info(f"[LLM] Pruned {len(indices_to_remove)} old messages from context using pattern '{pattern}'.")
         return new_messages
 
     async def _query_with_tools(
@@ -1068,6 +1063,7 @@ class LLMBackend:
                 messages.append(assistant_msg)
                 for tool_call in tool_calls:
                     call_id, name, arguments = self._normalize_tool_call(tool_call)
+                    logger_info.info(f"[LLM] Tool call: {name} | Args: {arguments}")
                     if not name:
                         messages.append({"role": "tool", "content": "Tool call missing name.", "tool_call_id": call_id or ""})
                         continue
@@ -1088,9 +1084,9 @@ class LLMBackend:
                     try:
                         self._notify_activity()
                         if tool_meta.get("subagent"):
-                            log(f"[LLM] Delegating '{name}' to SubAgent with question: {original_question}")
+                            logger_info.info(f"[LLM] Delegating '{name}' to SubAgent with question: {original_question}")
                             tool_result = await self._run_subagent(name, original_question, pack_id)
-                            log(f"[LLM] SubAgent '{name}' finished. Result summary: {tool_result[:200]}...")
+                            logger_info.info(f"[LLM] SubAgent '{name}' finished. Result summary: {tool_result[:200]}...")
                         else:
                             tool_result = await self._mcp_manager.call_tool(name, parsed_args)
                         self._notify_activity()
@@ -1101,7 +1097,7 @@ class LLMBackend:
                         tool_result = str(tool_result)
                     
                     if not tool_meta.get("subagent"):
-                        log(f"[LLM] Called tool {name}, result: {tool_result}")
+                        logger_info.info(f"[LLM] Called tool {name}, result: {tool_result}")
                         
                     messages.append({"role": "tool", "content": tool_result, "tool_call_id": call_id or ""})
                 continue

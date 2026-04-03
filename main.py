@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 from pathlib import Path
 project_root = Path(__file__).parent.absolute()
 if str(project_root) not in sys.path:
@@ -30,54 +31,17 @@ else:
 from resona_desktop_pet.web_server import WebServerThread, session_manager, ClientSession
 from memory.memory_manager import MemoryManager
 from memory.startup_processor import StartupProcessor
-log_dir = project_root / "logs"
-log_dir.mkdir(exist_ok=True)
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-log_file = log_dir / f"app_{timestamp}.log"
-sovits_log_file = log_dir / f"sovits_{timestamp}.log"
-sovits_server_log_file = log_dir / f"sovits_server_{timestamp}.log"
-llm_log_file = log_dir / f"llm_{timestamp}.log"
-import logging
-def setup_dedicated_logger(name, file_path, level=logging.INFO):
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-    if not logger.handlers:
-        handler = logging.FileHandler(file_path, encoding="utf-8")
-        handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-        logger.addHandler(handler)
-    logger.propagate = False
-    return logger
-
-def get_sovits_logger():
-    return setup_dedicated_logger("SoVITS", sovits_log_file)
-
-def get_sovits_server_logger():
-    return setup_dedicated_logger("SoVITS-Server", sovits_server_log_file)
-
-def get_llm_logger():
-    return setup_dedicated_logger("LLM", llm_log_file)
+from resona_desktop_pet.utils.logger import setup_logging, get_logger
 
 def exception_hook(exctype, value, tb):
     traceback.print_exception(exctype, value, tb)
     logging.error("Uncaught exception:", exc_info=(exctype, value, tb))
 
-sys.excepthook = exception_hook
-# sovits_logger = setup_dedicated_logger("SoVITS", sovits_log_file)
-# llm_logger = setup_dedicated_logger("LLM", llm_log_file)
-class TeeLogger:
-    def __init__(self, filename, terminal):
-        self.terminal = terminal
-        self.log_file = open(filename, "a", encoding="utf-8", buffering=1)
-    def write(self, message):
-        self.terminal.write(message)
-        self.log_file.write(message)
-    def flush(self):
-        self.terminal.flush()
-        self.log_file.flush()
-    def isatty(self):
-        return getattr(self.terminal, 'isatty', lambda: False)()
 def log(message):
     logging.info(message)
+
+logger = logging.getLogger("Main")
+
 class AudioPlayer(QObject):
     playback_finished = Signal()
     def __init__(self, parent=None):
@@ -103,10 +67,10 @@ class AudioPlayer(QObject):
             self._audio_output = QAudioOutput()
             self._audio_output.setVolume(1.0)
             self._player.setAudioOutput(self._audio_output)
-            log("[AudioPlayer] Audio output device refreshed to system default")
+            logger.info("[AudioPlayer] Audio output device refreshed to system default")
             return True
         except Exception as e:
-            log(f"[AudioPlayer] Failed to refresh audio device: {e}")
+            logger.info(f"[AudioPlayer] Failed to refresh audio device: {e}")
             return False
 
 class TimerScheduler(QObject):
@@ -170,7 +134,7 @@ class TimerScheduler(QObject):
             if isinstance(data, list):
                 return data
         except Exception as e:
-            log(f"[Timer] Failed to read {path}: {e}")
+            logger.info(f"[Timer] Failed to read {path}: {e}")
         return []
 
     def _write_json(self, path: Path, data: list):
@@ -180,7 +144,7 @@ class TimerScheduler(QObject):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            log(f"[Timer] Failed to write {path}: {e}")
+            logger.info(f"[Timer] Failed to write {path}: {e}")
 
     def _normalize_task(self, entry: dict, now: float) -> dict:
         task_id = entry.get("id") or f"timer_{int(now * 1000)}_{random.randint(1000, 9999)}"
@@ -240,7 +204,7 @@ class TimerScheduler(QObject):
                     task_pack_id = task.get("pack_id") or getattr(self.config.pack_manager, "active_pack_id", "") or "default"
                     if task_pack_id != getattr(self.config.pack_manager, "active_pack_id", ""):
                         continue
-                    log(f"[Timer] Pre-synthesize queued. id={task.get('id')} due_at={task.get('due_at')}")
+                    logger.info(f"[Timer] Pre-synthesize queued. id={task.get('id')} due_at={task.get('due_at')}")
                     self._start_synthesize(task)
                     break
 
@@ -292,16 +256,16 @@ class TimerScheduler(QObject):
                 updated = True
 
             if now >= due_at:
-                log(f"[Timer] Task due. id={task.get('id')} status={status} audio={bool(task.get('audio_path'))} busy={busy}")
+                logger.info(f"[Timer] Task due. id={task.get('id')} status={status} audio={bool(task.get('audio_path'))} busy={busy}")
                 if busy or not self._ready_to_trigger(now):
-                    log(f"[Timer] Task delayed (busy or cooldown). id={task.get('id')}")
+                    logger.info(f"[Timer] Task delayed (busy or cooldown). id={task.get('id')}")
                     task["status"] = "ready"
                     task.setdefault("ready_since", now)
                     kept.append(task)
                     updated = True
                     continue
                 if self._trigger_task(task):
-                    log(f"[Timer] Task triggered and removed. id={task.get('id')}")
+                    logger.info(f"[Timer] Task triggered and removed. id={task.get('id')}")
                     updated = True
                     continue
                 task["status"] = "ready"
@@ -317,7 +281,7 @@ class TimerScheduler(QObject):
         task_pack_id = task.get("pack_id") or getattr(self.config.pack_manager, "active_pack_id", "") or "default"
         active_pack_id = getattr(self.config.pack_manager, "active_pack_id", "") or "default"
         if task_pack_id != active_pack_id:
-            log(f"[Timer] Task skipped due to inactive pack. id={task.get('id')} task_pack={task_pack_id} active_pack={active_pack_id}")
+            logger.info(f"[Timer] Task skipped due to inactive pack. id={task.get('id')} task_pack={task_pack_id} active_pack={active_pack_id}")
             return True
         text = task.get("text_display", "")
         emotion = task.get("emotion", "<E:smile>")
@@ -326,10 +290,10 @@ class TimerScheduler(QObject):
         if audio_path:
             path = Path(audio_path)
             if path.exists():
-                log(f"[Timer] Playing pre-synth audio. id={task_id} path={path}")
+                logger.info(f"[Timer] Playing pre-synth audio. id={task_id} path={path}")
                 self.controller._trigger_voice_response(text, emotion, voice_file=str(path), is_behavior=False)
                 return True
-            log(f"[Timer] Audio path missing. id={task_id} path={path}")
+            logger.info(f"[Timer] Audio path missing. id={task_id} path={path}")
         timed_out = False
         if self.pre_synthesize:
             if self._synth_inflight_id is not None:
@@ -339,7 +303,7 @@ class TimerScheduler(QObject):
                     timeout_sec = max(5.0, float(self.config.sovits_timeout) + 5.0)
                     elapsed = now - started_at
                     if elapsed >= timeout_sec:
-                        log(f"[Timer] Synth timeout, falling back to text. id={task_id} waited={elapsed:.1f}s")
+                        logger.info(f"[Timer] Synth timeout, falling back to text. id={task_id} waited={elapsed:.1f}s")
                         self._synth_inflight_id = None
                         self._synth_inflight_started_at = None
                         self._synth_inflight_last_log_at = None
@@ -347,18 +311,18 @@ class TimerScheduler(QObject):
                     else:
                         last_log_at = self._synth_inflight_last_log_at or 0.0
                         if now - last_log_at >= 5.0:
-                            log(f"[Timer] Awaiting synth result. id={task_id} waited={elapsed:.1f}s")
+                            logger.info(f"[Timer] Awaiting synth result. id={task_id} waited={elapsed:.1f}s")
                             self._synth_inflight_last_log_at = now
                         return False
                 if self._synth_inflight_id is not None:
-                    log(f"[Timer] Synth busy with another task. id={task_id} inflight={self._synth_inflight_id}")
+                    logger.info(f"[Timer] Synth busy with another task. id={task_id} inflight={self._synth_inflight_id}")
                     return False
             if not timed_out and self._tts_idle(time.time()) and not self.controller.main_window.is_busy:
-                log(f"[Timer] Trigger requests synth. id={task_id}")
+                logger.info(f"[Timer] Trigger requests synth. id={task_id}")
                 self._start_synthesize(task)
                 return False
         self.controller.main_window.show_behavior_response_with_timeout(text, emotion)
-        log(f"[Timer] Trigger fell back to text. id={task_id}")
+        logger.info(f"[Timer] Trigger fell back to text. id={task_id}")
         return True
 
     async def _synthesize_task(self, task: dict):
@@ -376,7 +340,7 @@ class TimerScheduler(QObject):
         self._synth_inflight_id = task_id
         self._synth_inflight_started_at = time.time()
         self._synth_inflight_last_log_at = self._synth_inflight_started_at
-        log(f"[Timer] Synth start. id={task_id} text_tts_len={len(task.get('text_tts') or '')}")
+        logger.info(f"[Timer] Synth start. id={task_id} text_tts_len={len(task.get('text_tts') or '')}")
         self.controller._mark_tts_activity()
         future = asyncio.run_coroutine_threadsafe(self._synthesize_task(task), self.controller._loop)
         def _done(fut):
@@ -404,11 +368,11 @@ class TimerScheduler(QObject):
                     task["audio_duration"] = float(result.duration)
                     task["duration"] = float(result.duration)
                 task["status"] = task.get("status", "pending")
-                log(f"[Timer] Synth done. id={task_id} path={result.audio_path}")
+                logger.info(f"[Timer] Synth done. id={task_id} path={result.audio_path}")
             else:
                 task["status"] = "failed"
                 task["error"] = error or getattr(result, "error", "unknown_error")
-                log(f"[Timer] Synth failed. id={task_id} error={task.get('error')}")
+                logger.info(f"[Timer] Synth failed. id={task_id} error={task.get('error')}")
             updated = True
             break
         if updated:
@@ -422,13 +386,13 @@ class ApplicationController(QObject):
     pack_switch_ready = Signal()
     external_query_signal = Signal(str)
     sovits_ready = Signal(bool, str)
-    def __init__(self, sovits_log_path: Optional[Path] = None):
+    def __init__(self, sovits_log_path: Optional[Path] = None, llm_log_path: Optional[Path] = None):
         super().__init__()
         self.config = ConfigManager(str(project_root / "config.cfg"))
         self.project_root = Path(self.config.config_path).parent
         self.config.print_all_configs()
         pm = self.config.pack_manager
-        log(f"[Debug] PackManager Active ID: {pm.active_pack_id}")
+        logger.info(f"[Debug] PackManager Active ID: {pm.active_pack_id}")
         
         self._loop = asyncio.get_event_loop()
         
@@ -445,14 +409,14 @@ class ApplicationController(QObject):
         if self.config.external_ws_enabled:
             QTimer.singleShot(4000, self._start_external_ws_server)
 
-        log(f"[Debug] PackManager Data Loaded: {bool(pm.pack_data)}")
+        logger.info(f"[Debug] PackManager Data Loaded: {bool(pm.pack_data)}")
 
         pm.load_plugins(self.config.plugins_enabled)
 
         if pm.pack_data:
-            log(f"[Debug] Character Name from Pack: {pm.get_info('character', {}).get('name')}")
+            logger.info(f"[Debug] Character Name from Pack: {pm.get_info('character', {}).get('name')}")
         else:
-            log("[Debug] CRITICAL: Pack data is empty! Check pack.json path and ID.")
+            logger.info("[Debug] CRITICAL: Pack data is empty! Check pack.json path and ID.")
         self._cleanup_temp_dir()
         self._tts_activity_at = time.time()
 
@@ -460,7 +424,7 @@ class ApplicationController(QObject):
         self.can_monitor_gpu = True
         try:
             import subprocess
-            log("[Main] GPU detection starting (using pnputil)...")
+            logger.info("[Main] GPU detection starting (using pnputil)...")
             output = ""
             try:
                 result = subprocess.run(
@@ -476,10 +440,10 @@ class ApplicationController(QObject):
                 except UnicodeDecodeError:
                     output = raw_out.decode("gbk", errors="ignore")
             except subprocess.TimeoutExpired:
-                log("[Main] GPU detection timed out on pnputil.")
+                logger.info("[Main] GPU detection timed out on pnputil.")
             except Exception as ps_e:
                 if not output.strip():
-                    log(f"[Main] GPU detection failed (pnputil): {ps_e}")
+                    logger.info(f"[Main] GPU detection failed (pnputil): {ps_e}")
 
             output_up = output.upper()
             has_nvidia = "NVIDIA" in output_up
@@ -488,22 +452,22 @@ class ApplicationController(QObject):
             if has_nvidia:
                 self.gpu_vendor = "NVIDIA"
                 self.can_monitor_gpu = True
-                log("[Main] NVIDIA GPU detected. GPU monitoring enabled.")
+                logger.info("[Main] NVIDIA GPU detected. GPU monitoring enabled.")
                 if has_amd:
-                    log("[Main] Hybrid GPU system (NVIDIA + AMD) detected. Monitoring NVIDIA dGPU.")
+                    logger.info("[Main] Hybrid GPU system (NVIDIA + AMD) detected. Monitoring NVIDIA dGPU.")
             elif has_amd:
                 self.gpu_vendor = "AMD"
                 self.can_monitor_gpu = False
-                log("[Main] AMD GPU detected (No NVIDIA dGPU). Disabling GPU monitoring to prevent crashes.")
+                logger.info("[Main] AMD GPU detected (No NVIDIA dGPU). Disabling GPU monitoring to prevent crashes.")
                 if self.config.sovits_device == "cuda":
-                    log("[Main] AMD GPU detected but SoVITS device is 'cuda'. Forcing to 'cpu' for compatibility.")
+                    logger.info("[Main] AMD GPU detected but SoVITS device is 'cuda'. Forcing to 'cpu' for compatibility.")
                     self.config.set("SoVITS", "device", "cpu")
                     self.config.save()
             else:
-                log("[Main] No known discrete GPU detected (Intel or Unknown). GPU monitoring disabled.")
+                logger.info("[Main] No known discrete GPU detected (Intel or Unknown). GPU monitoring disabled.")
                 self.can_monitor_gpu = False
         except Exception as e:
-            log(f"[Main] GPU detection skipped or failed: {e}")
+            logger.info(f"[Main] GPU detection skipped or failed: {e}")
 
         self._stt_ready = False
         self._last_llm_response = None
@@ -524,7 +488,7 @@ class ApplicationController(QObject):
         self.state = self._load_state()
         
         if self.config.sovits_enabled and self.config.sovits_mode == "local":
-            log("[Main] SoVITS async startup scheduled (local mode).")
+            logger.info("[Main] SoVITS async startup scheduled (local mode).")
             self.sovits_ready.connect(self._on_sovits_ready)
             self._start_sovits_async()
         
@@ -533,9 +497,9 @@ class ApplicationController(QObject):
         self.memory_manager = None
         if hasattr(self.config, 'memory_enabled') and self.config.memory_enabled:
             self.memory_manager = MemoryManager(self.project_root, self.config)
-            log("[Main] Memory manager initialized")
+            logger.info("[Main] Memory manager initialized")
         
-        self.llm_backend = LLMBackend(self.config, log_path=llm_log_file, mcp_manager=self.mcp_manager)
+        self.llm_backend = LLMBackend(self.config, log_path=llm_log_path, mcp_manager=self.mcp_manager)
         if self.memory_manager:
             self.llm_backend._memory_manager = self.memory_manager
         
@@ -552,27 +516,27 @@ class ApplicationController(QObject):
             from resona_desktop_pet.backend import get_stt_backend
             STTBackend = get_stt_backend()
             self.stt_backend = STTBackend(self.config)
-            log("[Main] STT backend initialized")
+            logger.info("[Main] STT backend initialized")
         else:
-            log("[Main] STT backend skipped")
+            logger.info("[Main] STT backend skipped")
         
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
         self._loop_thread.start()
         
         if self.config.sovits_enabled and self.config.sovits_mode == "server":
-            log(f"[Main] SoVITS server mode: connecting to {self.config.sovits_server_host}:{self.config.sovits_server_port}")
+            logger.info(f"[Main] SoVITS server mode: connecting to {self.config.sovits_server_host}:{self.config.sovits_server_port}")
             asyncio.run_coroutine_threadsafe(self._connect_remote_sovits(), self._loop)
         if self.config.mcp_enabled:
-            log("[Main] MCP startup begin.")
+            logger.info("[Main] MCP startup begin.")
             future = asyncio.run_coroutine_threadsafe(self.mcp_manager.start(), self._loop)
             try:
                 future.result(timeout=self.config.mcp_startup_timeout + 5)
             except Exception as e:
-                log(f"[Main] MCP startup failed: {e}")
+                logger.info(f"[Main] MCP startup failed: {e}")
         
         if hasattr(self.config, 'memory_enabled') and self.config.memory_enabled and self.config.memory_startup_processing:
-            log("[Main] Scheduling startup memory processing...")
+            logger.info("[Main] Scheduling startup memory processing...")
             asyncio.run_coroutine_threadsafe(self._process_startup_memory(), self._loop)
         
         self.audio_player = AudioPlayer(self)
@@ -586,7 +550,7 @@ class ApplicationController(QObject):
         self.tray_icon.show()
         
         if hasattr(self.config, 'memory_enabled') and self.config.memory_enabled and self.config.memory_startup_processing:
-            log("[Main] Scheduling startup memory processing...")
+            logger.info("[Main] Scheduling startup memory processing...")
             asyncio.run_coroutine_threadsafe(self._process_startup_memory(), self._loop)
 
         self.debug_panel = None
@@ -597,7 +561,7 @@ class ApplicationController(QObject):
                 self.debug_panel.request_manual_response.connect(self.handle_manual_debug_response)
                 QTimer.singleShot(1000, lambda: self._add_debug_to_tray())
             except Exception as e:
-                log(f"[Main] Failed to initialize DebugPanel: {e}")
+                logger.info(f"[Main] Failed to initialize DebugPanel: {e}")
 
         self.main_window.stats["total_clicks"] = self.state.get("total_clicks", 0)
         
@@ -611,16 +575,16 @@ class ApplicationController(QObject):
             self.behavior_monitor.start()
         else:
             self.behavior_monitor = None
-            log("[Main] BehaviorMonitor disabled on non-Windows platform")
+            logger.info("[Main] BehaviorMonitor disabled on non-Windows platform")
         self._mocker_process = None
         if self.config.debug_trigger:
             import subprocess
             mocker_script = self.project_root / "tools" / "sensor_mocker.py"
-            log(f"[Debug] debugtrigger is ENABLED. Starting sensor mocker: {mocker_script}")
+            logger.info(f"[Debug] debugtrigger is ENABLED. Starting sensor mocker: {mocker_script}")
             self._mocker_process = subprocess.Popen([sys.executable, str(mocker_script)], cwd=str(self.project_root))
         self.main_window.pack_changed.connect(self._handle_pack_change)
         self.main_window._pack_change_handler_connected = True
-        log("[PackSwitch] pack_changed signal connected")
+        logger.info("[PackSwitch] pack_changed signal connected")
         self.pack_switch_ready.connect(self._finalize_ui_after_pack_change, Qt.QueuedConnection)
         self.main_window.request_query.connect(self._handle_user_query)
         self.external_query_signal.connect(self._handle_user_query)
@@ -658,7 +622,7 @@ class ApplicationController(QObject):
     
     def _start_sovits_async(self):
         if self._sovits_startup_thread and self._sovits_startup_thread.is_alive():
-            log("[Main] SoVITS startup thread already running.")
+            logger.info("[Main] SoVITS startup thread already running.")
             return
         
         self._sovits_startup_thread = threading.Thread(
@@ -672,7 +636,7 @@ class ApplicationController(QObject):
             self._sovits_startup_attempts += 1
             attempt = self._sovits_startup_attempts
             
-            log(f"[Main] SoVITS startup attempt {attempt}/{self._sovits_max_attempts}")
+            logger.info(f"[Main] SoVITS startup attempt {attempt}/{self._sovits_max_attempts}")
             
             try:
                 manager = SoVITSManager(
@@ -684,30 +648,30 @@ class ApplicationController(QObject):
                 
                 if manager.start(timeout=60, kill_existing=self.config.sovits_kill_existing):
                     self.sovits_manager = manager
-                    log(f"[Main] SoVITS started successfully on attempt {attempt}.")
+                    logger.info(f"[Main] SoVITS started successfully on attempt {attempt}.")
                     self.sovits_ready.emit(True, f"SoVITS service ready (attempt {attempt}/{self._sovits_max_attempts})")
                     return
                 else:
-                    log(f"[Main] SoVITS startup attempt {attempt} failed: start() returned False")
+                    logger.info(f"[Main] SoVITS startup attempt {attempt} failed: start() returned False")
                     if manager.process:
                         try:
                             manager.stop()
                         except:
                             pass
             except Exception as e:
-                log(f"[Main] SoVITS startup attempt {attempt} exception: {e}")
+                logger.info(f"[Main] SoVITS startup attempt {attempt} exception: {e}")
             
             if attempt < self._sovits_max_attempts:
-                log(f"[Main] Retrying SoVITS startup in 2 seconds...")
+                logger.info(f"[Main] Retrying SoVITS startup in 2 seconds...")
                 time.sleep(2)
         
-        log(f"[Main] SoVITS startup failed after {self._sovits_max_attempts} attempts.")
+        logger.info(f"[Main] SoVITS startup failed after {self._sovits_max_attempts} attempts.")
         self.sovits_ready.emit(False, f"SoVITS service startup failed after {self._sovits_max_attempts} attempts")
     
     def _on_sovits_ready(self, success: bool, message: str):
         if success:
             self._sovits_ready = True
-            log(f"[Main] SoVITS ready: {message}")
+            logger.info(f"[Main] SoVITS ready: {message}")
             print(f"[Main] {message}")
             
             if self._pending_tts_requests:
@@ -722,7 +686,7 @@ class ApplicationController(QObject):
                     )
                 self._pending_tts_requests.clear()
         else:
-            log(f"[Main] SoVITS failed: {message}")
+            logger.info(f"[Main] SoVITS failed: {message}")
             self._pending_tts_requests.clear()
             QMessageBox.critical(None, "SoVITS Startup Failed", 
                 f"Failed to start GPT-SoVITS service.\n\n{message}\n\nPlease check your configuration.")
@@ -732,13 +696,13 @@ class ApplicationController(QObject):
         try:
             import keyboard
             g_hotkey = self.config.global_show_hotkey
-            log(f"[Main] Registering global show hotkey: {g_hotkey}")
+            logger.info(f"[Main] Registering global show hotkey: {g_hotkey}")
             keyboard.add_hotkey(g_hotkey, lambda: self.request_global_show.emit())
         except Exception as e:
-            log(f"[Main] Failed to register global show hotkey: {e}")
+            logger.info(f"[Main] Failed to register global show hotkey: {e}")
 
         if self.config.stt_enabled:
-            log("[Main] Initializing STT hotkey and loading model...")
+            logger.info("[Main] Initializing STT hotkey and loading model...")
             self.stt_backend.register_hotkey(lambda: self.request_stt_start.emit())
             asyncio.run_coroutine_threadsafe(self._async_init_stt(), self._loop)
 
@@ -748,13 +712,13 @@ class ApplicationController(QObject):
             if hasattr(self, 'tray_icon'):
                 self.tray_icon.add_menu_action("Dev Control Panel", self.debug_panel.show)
         except Exception as e:
-            log(f"[Main] Tray integration for debug panel failed: {e}")
+            logger.info(f"[Main] Tray integration for debug panel failed: {e}")
 
     def handle_manual_debug_response(self, data):
         response = data["response"]
         setattr(response, 'tts_lang', data.get("tts_lang", "ja"))
 
-        log(f"[DebugPanel] Manual response received: {response.emotion} | {response.text_display}")
+        logger.info(f"[DebugPanel] Manual response received: {response.emotion} | {response.text_display}")
 
         self.main_window.start_thinking()
 
@@ -762,17 +726,17 @@ class ApplicationController(QObject):
 
     async def _async_init_stt(self):
         if not self.stt_backend:
-            log("[Main] STT backend not available, skipping model load.")
+            logger.info("[Main] STT backend not available, skipping model load.")
             return
         success = await self.stt_backend.load_model()
         if success:
-            log("[Main] STT Model loaded and ready.")
+            logger.info("[Main] STT Model loaded and ready.")
             self._stt_ready = True
         else:
-            log("[Main] STT Model loading FAILED.")
+            logger.info("[Main] STT Model loading FAILED.")
     def _force_unlock(self):
         if self.is_busy:
-            log("[Watchdog] BUSY state timeout! Force unlocking to prevent freeze.")
+            logger.info("[Watchdog] BUSY state timeout! Force unlocking to prevent freeze.")
             self._is_chain_executing = False
             self.main_window.finish_processing()
     def _mark_tts_activity(self):
@@ -961,7 +925,7 @@ class ApplicationController(QObject):
     async def handle_web_pack_switch(self, pack_id: str, session: ClientSession):
         session.touch()
         
-        log(f"[Web] Session {session.session_id} switching to pack {pack_id}")
+        logger.info(f"[Web] Session {session.session_id} switching to pack {pack_id}")
         
         try:
             session.pack_id = pack_id
@@ -986,7 +950,7 @@ class ApplicationController(QObject):
             })
             
         except Exception as e:
-            log(f"[Web] Pack switch failed: {e}")
+            logger.info(f"[Web] Pack switch failed: {e}")
             await session.websocket.send_json({"type": "error", "message": f"Pack switch failed: {str(e)}"})
 
     async def handle_web_start_recording(self, session: ClientSession):
@@ -1042,7 +1006,7 @@ class ApplicationController(QObject):
 
     async def handle_web_audio(self, file_path: str, session: ClientSession):
         session.touch()
-        log(f"[Web] handle_web_audio start path={file_path}")
+        logger.info(f"[Web] handle_web_audio start path={file_path}")
         
         if threading.current_thread() != threading.main_thread():
             QTimer.singleShot(0, lambda: self.main_window.set_listening(False))
@@ -1064,12 +1028,12 @@ class ApplicationController(QObject):
                 )
             else:
                 res = None
-                log("[Web] STT backend not available")
+                logger.info("[Web] STT backend not available")
         except asyncio.TimeoutError:
             res = None
-            log(f"[Web] handle_web_audio stt timeout after {timeout_sec}s")
+            logger.info(f"[Web] handle_web_audio stt timeout after {timeout_sec}s")
         if res:
-            log(f"[Web] handle_web_audio stt done error={res.error} text_len={len(res.text) if res and res.text else 0}")
+            logger.info(f"[Web] handle_web_audio stt done error={res.error} text_len={len(res.text) if res and res.text else 0}")
         
         try:
             os.remove(file_path)
@@ -1094,20 +1058,20 @@ class ApplicationController(QObject):
                  idle_image_url = None
              await session.websocket.send_json({"type": "status", "state": "idle", "image_url": idle_image_url})
         else:
-             log(f"[Web] handle_web_audio transcription={res.text}")
+             logger.info(f"[Web] handle_web_audio transcription={res.text}")
              await session.websocket.send_json({"type": "transcription", "text": res.text})
              await self.handle_web_query(res.text, session)
 
     def _handle_user_query(self, text: str):
         print(f"[Main] _handle_user_query called with: '{text}' (thread: {threading.current_thread().name})")
-        log(f"[Main] _handle_user_query called with: '{text}' (thread: {threading.current_thread().name})")
+        logger.info(f"[Main] _handle_user_query called with: '{text}' (thread: {threading.current_thread().name})")
         if not text.strip(): return
 
         if self.is_busy:
-            log(f"[Main] Program is busy, ignoring user query: {text}")
+            logger.info(f"[Main] Program is busy, ignoring user query: {text}")
             return
             
-        log(f"[Main] User query received: {text}")
+        logger.info(f"[Main] User query received: {text}")
         self._last_question_time = time.time()
         self._idle_trigger_count = 0
         self._current_watchdog_interval = 300000
@@ -1115,19 +1079,17 @@ class ApplicationController(QObject):
         self.main_window.start_thinking()
         asyncio.run_coroutine_threadsafe(self._query_llm(text), self._loop)
     async def _query_llm(self, text: str):
-        get_llm_logger()
-        
         try:
             response = await self.llm_backend.query(text, pack_id=self.config.pack_manager.active_pack_id, source="desktop")
             self.llm_response_ready.emit(response)
         except Exception as e:
-            log(f"[Main] LLM query failed: {e}")
+            logger.info(f"[Main] LLM query failed: {e}")
             from resona_desktop_pet.backend.llm_backend import LLMResponse
             self.llm_response_ready.emit(LLMResponse(error=str(e)))
 
     def _handle_llm_response(self, response):
         self._last_llm_response = response
-        log(f"[Main] LLM response returned. Error={response.error}")
+        logger.info(f"[Main] LLM response returned. Error={response.error}")
         
         self._current_watchdog_interval = (self.config.sovits_timeout + 15) * 1000
         if self._busy_watchdog.isActive():
@@ -1141,9 +1103,9 @@ class ApplicationController(QObject):
         tts_lang_for_trigger = getattr(response, 'tts_lang', None)
         self._trigger_voice_response(response.text_display, response.emotion, None, tts_text=response.text_tts, tts_lang=tts_lang_for_trigger)
     def _handle_tts_ready(self, result):
-        log(f"[Main] TTS synthesized ready. Success={not result.error}")
+        logger.info(f"[Main] TTS synthesized ready. Success={not result.error}")
         if self._drop_tts_results or self._pack_switch_pending:
-            log("[Main] Dropping TTS result due to pack switch.")
+            logger.info("[Main] Dropping TTS result due to pack switch.")
             return
         self._mark_tts_activity()
         self.main_window.show_response(self._current_text, self._current_emotion)
@@ -1157,13 +1119,13 @@ class ApplicationController(QObject):
             QTimer.singleShot(2000, self.main_window.finish_processing)
     def _on_audio_finished(self):
         try:
-            log("[Main] Audio playback finished.")
+            logger.info("[Main] Audio playback finished.")
             self._mark_tts_activity()
             self.main_window.set_speaking(False)
             self.main_window.on_audio_complete()
             self._busy_watchdog.stop()
         except OverflowError as e:
-            log(f"[Main] OverflowError in _on_audio_finished: {e}")
+            logger.info(f"[Main] OverflowError in _on_audio_finished: {e}")
             self._is_chain_executing = False
 
     def _start_web_server(self):
@@ -1179,9 +1141,9 @@ class ApplicationController(QObject):
                 self.config.html_static_dir
             )
             self.web_server_thread.start()
-            log(f"[Main] Web server started on {self.config.html_host}:{self.config.html_port}")
+            logger.info(f"[Main] Web server started on {self.config.html_host}:{self.config.html_port}")
         except Exception as e:
-            log(f"[Main] Failed to start web server: {e}")
+            logger.info(f"[Main] Failed to start web server: {e}")
 
     def _start_external_ws_server(self):
         try:
@@ -1193,9 +1155,9 @@ class ApplicationController(QObject):
                 self.config.external_ws_port
             )
             self.external_ws_thread.start()
-            log(f"[Main] External WebSocket server started on {self.config.external_ws_host}:{self.config.external_ws_port}")
+            logger.info(f"[Main] External WebSocket server started on {self.config.external_ws_host}:{self.config.external_ws_port}")
         except Exception as e:
-            log(f"[Main] Failed to start external WS server: {e}")
+            logger.info(f"[Main] Failed to start external WS server: {e}")
 
     def _trigger_voice_response(self, text, emotion, voice_file=None, is_behavior=False, tts_text=None, tts_lang=None):
         if is_behavior and self.config.disable_actions:
@@ -1212,25 +1174,25 @@ class ApplicationController(QObject):
             
             if not v_path.exists() and pack_audio_path and pack_audio_path.exists():
                 search_name = Path(voice_file).name
-                log(f"[Main] Direct path not found: {v_path}. Searching for '{search_name}' in {pack_audio_path}...")
+                logger.info(f"[Main] Direct path not found: {v_path}. Searching for '{search_name}' in {pack_audio_path}...")
                 matches = list(pack_audio_path.rglob(search_name))
                 if matches:
                     v_path = matches[0]
-                    log(f"[Main] Found match via recursive search: {v_path}")
+                    logger.info(f"[Main] Found match via recursive search: {v_path}")
         
         if v_path and v_path.exists():
-            log(f"[Main] Playing pre-recorded: {v_path}")
+            logger.info(f"[Main] Playing pre-recorded: {v_path}")
             self.main_window.set_speaking(True)
             self.main_window.show_response(text, emotion)
             self._mark_tts_activity()
             self.audio_player.play(str(v_path))
         elif self.config.sovits_enabled and not is_behavior:
-            log("[Main] Handing over to SoVITS synthesis chain.")
+            logger.info("[Main] Handing over to SoVITS synthesis chain.")
             self.main_window.set_speaking(True)
             self._mark_tts_activity()
             asyncio.run_coroutine_threadsafe(self._generate_tts(tts_text or text, emotion, language=tts_lang), self._loop)
         else:
-            log("[Main] No audio source available, showing text response with timeout.")
+            logger.info("[Main] No audio source available, showing text response with timeout.")
             self.main_window.show_behavior_response_with_timeout(text, emotion)
     async def _generate_tts(self, text: str, emotion: str, language: Optional[str] = None):
         if self.config.sovits_enabled and self.config.sovits_mode == "local" and not self._sovits_ready:
@@ -1242,7 +1204,6 @@ class ApplicationController(QObject):
         await self._generate_tts_internal(text, emotion, language)
     
     async def _generate_tts_internal(self, text: str, emotion: str, language: Optional[str] = None):
-        get_sovits_logger()
         self._mark_tts_activity()
 
         if not language and self.config.use_pack_settings:
@@ -1285,7 +1246,7 @@ class ApplicationController(QObject):
             self._post_busy_cooldown_end = now + self.config.post_busy_delay
         self._last_busy_state = self.main_window.is_busy
         if self._pending_triggers and not self.is_busy and now >= self._post_busy_cooldown_end and now >= self._trigger_cooldown_end:
-            log("[Main] Executing pending trigger from queue.")
+            logger.info("[Main] Executing pending trigger from queue.")
             trigger = self._pending_triggers.pop(0)
             self._trigger_cooldown_end = now + self.config.trigger_cooldown
             self._execute_actions_chain(trigger)
@@ -1318,19 +1279,18 @@ class ApplicationController(QObject):
         if self.is_busy:
             return
         self._idle_trigger_count += 1
-        log(f"[Main] Idle trigger activated (count: {self._idle_trigger_count})")
+        logger.info(f"[Main] Idle trigger activated (count: {self._idle_trigger_count})")
         prompt = self.config.idle_trigger_prompt
         self._last_question_time = time.time()
         self.main_window.start_thinking()
         asyncio.run_coroutine_threadsafe(self._query_llm_idle(prompt), self._loop)
 
     async def _query_llm_idle(self, prompt: str):
-        get_llm_logger()
         try:
             response = await self.llm_backend.query_idle(prompt, pack_id=self.config.pack_manager.active_pack_id)
             self.llm_response_ready.emit(response)
         except Exception as e:
-            log(f"[Main] Idle LLM query failed: {e}")
+            logger.info(f"[Main] Idle LLM query failed: {e}")
             from resona_desktop_pet.backend.llm_backend import LLMResponse
             self.llm_response_ready.emit(LLMResponse(error=str(e)))
 
@@ -1338,7 +1298,7 @@ class ApplicationController(QObject):
         elapsed = time.time() - self._last_question_time
         halved = elapsed / 2
         self._last_question_time = time.time() - halved
-        log(f"[Main] Idle time halved: {elapsed:.1f}s -> {halved:.1f}s (remaining)")
+        logger.info(f"[Main] Idle time halved: {elapsed:.1f}s -> {halved:.1f}s (remaining)")
 
     def _cancel_action_chain(self):
         self._chain_cancelled = True
@@ -1415,7 +1375,7 @@ class ApplicationController(QObject):
                     delay_ms = int(sec * 1000)
                     QTimer.singleShot(delay_ms, execute_next)
                 except (ValueError, TypeError, OverflowError) as e:
-                    log(f"[Main] Delay action 参数错误: {action.get('sec')}, 错误: {e}")
+                    logger.info(f"[Main] Delay action parameter error: {action.get('sec')}, error: {e}")
 
                     execute_next()
                 return
@@ -1526,7 +1486,7 @@ class ApplicationController(QObject):
                             engine.gravity, engine.accel_x, engine.accel_y = restore_vals
                 QTimer.singleShot(int(sec * 1000), restore)
         elif atype == "exit_app":
-            log("[Main] Exit action triggered.")
+            logger.info("[Main] Exit action triggered.")
             self.force_exit()
         else:
             if self.config.plugins_enabled:
@@ -1535,11 +1495,11 @@ class ApplicationController(QObject):
                     pid = pm.plugin_action_map[atype]
                     module = pm.loaded_plugins.get(pid)
                     if module:
-                        log(f"[Main] Forwarding action '{atype}' to plugin '{pid}'")
+                        logger.info(f"[Main] Forwarding action '{atype}' to plugin '{pid}'")
                         params = action.get("params", [])
                         threading.Thread(target=module.execute_action, args=(atype, params), daemon=True).start()
     def _handle_pack_change(self, pack_id: str):
-        log(f"[PackSwitch] Start: requested={pack_id} current_active={self.config.pack_manager.active_pack_id} project_root={self.project_root}")
+        logger.info(f"[PackSwitch] Start: requested={pack_id} current_active={self.config.pack_manager.active_pack_id} project_root={self.project_root}")
         self._cancel_action_chain()
         self.main_window.hide()
         if hasattr(self, "timer_scheduler"):
@@ -1549,7 +1509,7 @@ class ApplicationController(QObject):
         self.config.pack_manager.load_plugins(self.config.plugins_enabled)
         
         if hasattr(self, 'llm_backend'):
-            log(f"[PackSwitch] Clearing conversation history for new pack: {pack_id}")
+            logger.info(f"[PackSwitch] Clearing conversation history for new pack: {pack_id}")
             self.llm_backend.clear_history()
 
         pdata = self.config.pack_manager.pack_data
@@ -1561,7 +1521,7 @@ class ApplicationController(QObject):
             target_outfit = outfits[0]
         new_outfit = target_outfit.get("id", "default") if target_outfit else "default"
         raw_prompt_rel = pdata.get("logic", {}).get("prompts", [{}])[0].get("path", "")
-        log(f"[PackSwitch] Pack data: active_pack_id={self.config.pack_manager.active_pack_id} name={new_name} default_outfit={new_outfit} prompt_rel={raw_prompt_rel}")
+        logger.info(f"[PackSwitch] Pack data: active_pack_id={self.config.pack_manager.active_pack_id} name={new_name} default_outfit={new_outfit} prompt_rel={raw_prompt_rel}")
         
         self.config.set("General", "active_pack", pack_id)
         self.config.set("General", "CharacterName", new_name)
@@ -1572,16 +1532,16 @@ class ApplicationController(QObject):
         self.config.load()
         if not self.config.sovits_enabled:
             try:
-                log(f"[PackSwitch] Pre-refresh config: active_pack={self.config.get('General','active_pack','')} default_outfit={self.config.default_outfit}")
+                logger.info(f"[PackSwitch] Pre-refresh config: active_pack={self.config.get('General','active_pack','')} default_outfit={self.config.default_outfit}")
                 self.main_window.refresh_from_config()
                 self.main_window.manual_show()
             except Exception as e:
                 print(f"[PackSwitch] ERROR during pre-refresh: {e}")
                 traceback.print_exc()
         else:
-            log("[PackSwitch] Deferring UI refresh until SoVITS ready")
+            logger.info("[PackSwitch] Deferring UI refresh until SoVITS ready")
         
-        log("[PackSwitch] Reloading backends")
+        logger.info("[PackSwitch] Reloading backends")
         self.tts_backend.reload_config()
         self.llm_backend.history.clear()
         if self.behavior_monitor:
@@ -1591,7 +1551,7 @@ class ApplicationController(QObject):
         self._pack_switch_deadline = time.time() + 75
         if not self._pack_switch_wait_timer.isActive():
             self._pack_switch_wait_timer.start()
-        log(f"[PackSwitch] Wait start: pending={self._pack_switch_pending} deadline={self._pack_switch_deadline} sovits_enabled={self.config.sovits_enabled}")
+        logger.info(f"[PackSwitch] Wait start: pending={self._pack_switch_pending} deadline={self._pack_switch_deadline} sovits_enabled={self.config.sovits_enabled}")
 
         if self.config.sovits_enabled:
             def wait_for_sovits_then_show():
@@ -1675,32 +1635,32 @@ class ApplicationController(QObject):
         self._is_chain_executing = False
     def _replay_last_response(self):
         if not self._last_llm_response: return
-        log("[Main] Replaying last response...")
+        logger.info("[Main] Replaying last response...")
         self.main_window.start_thinking()
         self._handle_llm_response(self._last_llm_response)
     def _refresh_audio_devices(self):
-        log("[Main] Refreshing audio devices...")
+        logger.info("[Main] Refreshing audio devices...")
         output_success = self.audio_player.refresh_audio_device()
         input_success = self.stt_backend.refresh_audio_device() if self.stt_backend else True
         if output_success and input_success:
-            log("[Main] Audio devices refreshed successfully")
+            logger.info("[Main] Audio devices refreshed successfully")
         else:
-            log("[Main] Failed to refresh some audio devices")
+            logger.info("[Main] Failed to refresh some audio devices")
     def _handle_stt_request(self):
         if not self._stt_ready or not self.stt_backend:
-            log("[STT] STT not ready or not available, ignoring request.")
+            logger.info("[STT] STT not ready or not available, ignoring request.")
             return
         if self.stt_backend.is_recording():
             self.stt_backend.stop_recording()
             return
-        log("[STT] Recording started...")
+        logger.info("[STT] Recording started...")
         self.main_window.set_input_locked(True)
         self.main_window.set_listening(True, username=self.config.username)
         asyncio.run_coroutine_threadsafe(self.stt_backend.start_recording(on_complete=lambda r: self.stt_result_ready.emit(r)), self._loop)
     def _handle_stt_result(self, result):
         if result.error:
-            log(f"[STT] Error: {result.error}")
-        log(f"[STT] Result: '{result.text}'")
+            logger.info(f"[STT] Error: {result.error}")
+        logger.info(f"[STT] Result: '{result.text}'")
         self.main_window.set_listening(False)
         self.main_window.set_input_locked(False)
         if result.text:
@@ -1713,21 +1673,21 @@ class ApplicationController(QObject):
         self.main_window.set_fullscreen_hidden(hidden)
     def _check_startup_events(self):
         enabled = self.config.weather_enabled
-        log(f"[Main] Startup events check. Weather enabled: {enabled}")
+        logger.info(f"[Main] Startup events check. Weather enabled: {enabled}")
         if enabled:
             asyncio.run_coroutine_threadsafe(self._check_weather(), self._loop)
     async def _check_weather(self):
         import aiohttp
-        log("[Weather] Starting weather service (Geo-locating via IP)...")
+        logger.info("[Weather] Starting weather service (Geo-locating via IP)...")
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get("http://ip-api.com/json/") as r:
                     data = await r.json()
                     city = data.get("city")
                     if not city:
-                        log(f"[Weather] Location failed: {data.get('message', 'Unknown error')}")
+                        logger.info(f"[Weather] Location failed: {data.get('message', 'Unknown error')}")
                         return
-                log(f"[Weather] Located city: {city}. Fetching weather data...")
+                logger.info(f"[Weather] Located city: {city}. Fetching weather data...")
                 url = f"http://api.weatherapi.com/v1/current.json?key={self.config.weather_api_key}&q={city}&lang=zh"
                 async with session.get(url) as r:
                     if r.status == 200:
@@ -1736,11 +1696,11 @@ class ApplicationController(QObject):
                             "condition": d["current"]["condition"]["text"],
                             "temp": d["current"]["temp_c"]
                         }
-                        log(f"[Weather] SUCCESS: {self.current_weather['condition']}, {self.current_weather['temp']}°C")
+                        logger.info(f"[Weather] SUCCESS: {self.current_weather['condition']}, {self.current_weather['temp']}°C")
                     else:
-                        log(f"[Weather] API error: Status {r.status}")
+                        logger.info(f"[Weather] API error: Status {r.status}")
         except Exception as e:
-            log(f"[Weather] Service error: {e}")
+            logger.info(f"[Weather] Service error: {e}")
     
     async def _process_startup_memory(self):
         """Process startup memory"""
@@ -1748,7 +1708,7 @@ class ApplicationController(QObject):
             processor = StartupProcessor(self.project_root, self.config)
             await processor.process_startup()
         except Exception as e:
-            log(f"[Main] Error processing startup memory: {e}")
+            logger.info(f"[Main] Error processing startup memory: {e}")
     
     def _run_loop(self):
         asyncio.set_event_loop(self._loop)
@@ -1758,17 +1718,17 @@ class ApplicationController(QObject):
         try:
             pack_id = self.config.pack_manager.get_pack_json_id()
             if not pack_id:
-                log("[Main] No active pack, skipping remote SoVITS connection")
+                logger.info("[Main] No active pack, skipping remote SoVITS connection")
                 return
             
-            log(f"[Main] Connecting to remote SoVITS with pack: {pack_id}")
+            logger.info(f"[Main] Connecting to remote SoVITS with pack: {pack_id}")
             connected = await self.tts_backend.ensure_connected(pack_id)
             if connected:
-                log("[Main] Remote SoVITS connected successfully")
+                logger.info("[Main] Remote SoVITS connected successfully")
             else:
-                log("[Main] Failed to connect to remote SoVITS server")
+                logger.info("[Main] Failed to connect to remote SoVITS server")
         except Exception as e:
-            log(f"[Main] Error connecting to remote SoVITS: {e}")
+            logger.info(f"[Main] Error connecting to remote SoVITS: {e}")
     def _cleanup_temp_dir(self):
         import shutil
         temp_dir = self.project_root / "TEMP"
@@ -1795,7 +1755,7 @@ class ApplicationController(QObject):
         self._settings_dialog.activateWindow()
 
     def _on_settings_saved(self):
-        log("[Main] Config updated via settings dialog.")
+        logger.info("[Main] Config updated via settings dialog.")
         self.config.load()
         if self.behavior_monitor:
             self.behavior_monitor.load_triggers()
@@ -1860,9 +1820,9 @@ class ApplicationController(QObject):
                     
                     if user_msg and assistant_msg:
                         self.memory_manager.save_temp_session(user_msg, assistant_msg)
-                        log("[Main] Temporary session saved for startup processing")
+                        logger.info("[Main] Temporary session saved for startup processing")
             except Exception as e:
-                log(f"[Main] Error saving temporary session: {e}")
+                logger.info(f"[Main] Error saving temporary session: {e}")
 
         def _cleanup_task():
             if self._mocker_process:
@@ -1906,10 +1866,10 @@ def is_admin():
     else:
         import os
         return os.geteuid() == 0
-def run_as_admin():
+def run_as_admin(timestamp: str = None):
     args = sys.argv[:]
-    if "--log-file" not in args:
-        args.extend(["--log-file", str(log_file)])
+    if "--timestamp" not in args and timestamp:
+        args.extend(["--timestamp", timestamp])
     
     if sys.platform == "win32":
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(args), str(project_root), 1)
@@ -1922,20 +1882,20 @@ def run_as_admin():
 def main():
     import argparse
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--log-file", type=str, default=None)
+    parser.add_argument("--timestamp", type=str, default=None)
     args, unknown = parser.parse_known_args()
 
-    global log_file, sovits_log_file, llm_log_file
-    if args.log_file:
-        log_file = Path(args.log_file)
-        ts_part = log_file.stem.replace("app_", "")
-        sovits_log_file = log_dir / f"sovits_{ts_part}.log"
-        llm_log_file = log_dir / f"llm_{ts_part}.log"
-        
-    if not isinstance(sys.stdout, TeeLogger):
-        sys.stdout = TeeLogger(log_file, sys.stdout)
-        sys.stderr = sys.stdout
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s', handlers=[logging.StreamHandler(sys.stdout)], force=True)
+    if args.timestamp:
+        timestamp = args.timestamp
+    else:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    setup_logging(project_root, timestamp=timestamp)
+    sys.excepthook = exception_hook
+
+    log_dir = project_root / "logs" / timestamp
+    sovits_log_file = log_dir / "sovits.log"
+    llm_log_file = log_dir / "llm.log"
 
     config = ConfigManager(str(project_root / "config.cfg"))
     needs_admin = False
@@ -1955,7 +1915,7 @@ def main():
                         if check_sensitive(rule): needs_admin = True; break
             except: pass
     if needs_admin and not is_admin():
-        run_as_admin()
+        run_as_admin(timestamp)
         sys.exit()
 
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
@@ -1964,7 +1924,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
-    controller = ApplicationController(sovits_log_path=sovits_log_file)
+    controller = ApplicationController(sovits_log_path=sovits_log_file, llm_log_path=llm_log_file)
     app.aboutToQuit.connect(controller.cleanup)
     sys.exit(app.exec())
 if __name__ == "__main__":

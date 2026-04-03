@@ -71,7 +71,6 @@ class ConfigManager:
             f.writelines(new_lines)
 
     def get(self, section: str, key: str, fallback: Any = None) -> str:
-        # Check pack override config first
         if hasattr(self, 'pack_manager') and self.pack_manager.has_override():
             override_val = self.pack_manager.get_override_value(section, key)
             if override_val is not None:
@@ -97,7 +96,6 @@ class ConfigManager:
             raise RuntimeError(f"CRITICAL CONFIG ERROR: [{section}] -> '{key}' is missing in config.cfg. This value is mandatory.")
 
     def getint(self, section: str, key: str, fallback: int = 0) -> int:
-        # Check pack override config first
         if hasattr(self, 'pack_manager') and self.pack_manager.has_override():
             override_val = self.pack_manager.get_override_value(section, key)
             if override_val is not None:
@@ -108,7 +106,6 @@ class ConfigManager:
         return self.config.getint(section, key, fallback=fallback)
 
     def getfloat(self, section: str, key: str, fallback: float = 0.0) -> float:
-        # Check pack override config first
         if hasattr(self, 'pack_manager') and self.pack_manager.has_override():
             override_val = self.pack_manager.get_override_value(section, key)
             if override_val is not None:
@@ -119,7 +116,6 @@ class ConfigManager:
         return self.config.getfloat(section, key, fallback=fallback)
 
     def getboolean(self, section: str, key: str, fallback: bool = False) -> bool:
-        # Check pack override config first
         if hasattr(self, 'pack_manager') and self.pack_manager.has_override():
             override_val = self.pack_manager.get_override_value(section, key)
             if override_val is not None:
@@ -136,18 +132,11 @@ class ConfigManager:
         self.config.set(section, key, str(value))
 
     def get_effective_config(self, section: str, key: str, fallback: Any = None) -> tuple[str, str]:
-        """Get the effective config value and its source ('override' or 'main').
-
-        Returns:
-            tuple: (value, source) where source is 'override', 'main', or 'fallback'
-        """
-        # Check pack override config first
         if hasattr(self, 'pack_manager') and self.pack_manager.has_override():
             override_val = self.pack_manager.get_override_value(section, key)
             if override_val is not None:
                 return (override_val, 'override')
 
-        # Check main config
         val = self.config.get(section, key, fallback=None)
         if val is not None:
             return (val, 'main')
@@ -155,7 +144,6 @@ class ConfigManager:
         return (str(fallback), 'fallback')
 
     def is_overridden(self, section: str, key: str) -> bool:
-        """Check if a config key is being overridden by the current pack."""
         if not hasattr(self, 'pack_manager'):
             return False
         return self.pack_manager.get_override_value(section, key) is not None

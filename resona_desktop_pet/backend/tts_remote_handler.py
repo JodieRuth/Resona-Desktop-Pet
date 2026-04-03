@@ -6,10 +6,11 @@ import sys
 import socket
 import threading
 import subprocess
-from datetime import datetime
+import logging
 from pathlib import Path
 from typing import Optional, Dict, List
 from dataclasses import dataclass
+from datetime import datetime
 
 try:
     import websockets
@@ -22,10 +23,7 @@ BROADCAST_PORT = 19876
 BROADCAST_MAGIC = "SOVITS_SERVER_ANNOUNCE"
 DISCOVERY_TIMEOUT = 10.0
 
-
-def log(message: str):
-    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    print(f"[{timestamp}] [TTS-Remote] {message}")
+logger = logging.getLogger("TTS")
 
 
 @dataclass
@@ -74,7 +72,7 @@ class RemoteTTSHandler:
                                 "port": message.get("port"),
                                 "packs": message.get("packs", [])
                             }
-                            log(f"Discovered server: {self._discovered_server['host']}:{self._discovered_server['port']}")
+                            logger.info(f"Discovered server: {self._discovered_server['host']}:{self._discovered_server['port']}")
                     except socket.timeout:
                         continue
                     except Exception as e:
@@ -87,10 +85,10 @@ class RemoteTTSHandler:
 
             self._discovery_thread = threading.Thread(target=listen_loop, daemon=True)
             self._discovery_thread.start()
-            log(f"Discovery listener started on port {BROADCAST_PORT}")
+            logger.info(f"Discovery listener started on port {BROADCAST_PORT}")
             return True
         except Exception as e:
-            log(f"Failed to start discovery listener: {e}")
+            logger.info(f"Failed to start discovery listener: {e}")
             return False
 
     def _stop_discovery_listener(self):
@@ -116,59 +114,59 @@ class RemoteTTSHandler:
 
     async def connect_with_discovery(self, pack_id: str, prefer_discovery: bool = True) -> bool:
         if prefer_discovery and self.auto_discover:
-            log("Attempting to discover server via UDP broadcast...")
+            logger.info("Attempting to discover server via UDP broadcast...")
             discovered = await self.discover_server(timeout=DISCOVERY_TIMEOUT)
             if discovered:
                 self.server_host = discovered["host"]
                 self.server_port = discovered["port"]
                 self.ws_url = f"ws://{self.server_host}:{self.server_port}"
-                log(f"Using discovered server: {self.server_host}:{self.server_port}")
+                logger.info(f"Using discovered server: {self.server_host}:{self.server_port}")
             else:
-                log("Discovery timeout, using configured server address")
+                logger.info("Discovery timeout, using configured server address")
 
         return await self.connect(pack_id)
 
     async def connect(self, pack_id: str) -> bool:
         if websockets is None:
-            log("Error: websockets library not installed")
+            logger.info("Error: websockets library not installed")
             return False
 
         try:
             self._ws = await websockets.connect(self.ws_url, ping_interval=30, ping_timeout=10)
-            log(f"Connected to server: {self.ws_url}")
+            logger.info(f"Connected to server: {self.ws_url}")
 
             await self._ws.send(json.dumps({
                 "type": "handshake",
                 "pack_id": pack_id
             }))
 
-            log("Waiting for handshake_ack...")
+            logger.info("Waiting for handshake_ack...")
             response = await asyncio.wait_for(self._ws.recv(), timeout=10)
-            log(f"Received response: {response[:200]}...")
+            logger.info(f"Received response: {response[:200]}...")
             data = json.loads(response)
 
             if data.get("type") == "handshake_ack":
                 self._connected = True
                 self._available_packs = data.get("available_packs", [])
                 self._pack_valid = data.get("requested_pack_valid", False)
-                log(f"Handshake complete. Pack valid: {self._pack_valid}, Available: {self._available_packs}")
+                logger.info(f"Handshake complete. Pack valid: {self._pack_valid}, Available: {self._available_packs}")
                 
                 self._stop_discovery_listener()
 
                 self._receive_task = asyncio.create_task(self._receive_loop())
                 return True
             else:
-                log(f"Unexpected handshake response: {data}")
+                logger.info(f"Unexpected handshake response: {data}")
                 return False
 
         except asyncio.TimeoutError:
-            log("Connection failed: handshake timeout")
+            logger.info("Connection failed: handshake timeout")
             self._connected = False
             return False
         except Exception as e:
-            log(f"Connection failed: {e}")
+            logger.info(f"Connection failed: {e}")
             import traceback
-            log(f"Connection error traceback: {traceback.format_exc()}")
+            logger.info(f"Connection error traceback: {traceback.format_exc()}")
             self._connected = False
             return False
 
@@ -186,30 +184,30 @@ class RemoteTTSHandler:
                             if not future.done():
                                 future.set_result(data)
                 except Exception as e:
-                    log(f"Error processing message: {e}")
+                    logger.info(f"Error processing message: {e}")
         except asyncio.CancelledError:
-            log("Receive loop cancelled")
+            logger.info("Receive loop cancelled")
             raise
         except websockets.exceptions.ConnectionClosed:
-            log("Connection closed by server")
+            logger.info("Connection closed by server")
             self._connected = False
         except Exception as e:
-            log(f"Receive loop error: {e}")
+            logger.info(f"Receive loop error: {e}")
             self._connected = False
 
     async def ensure_connected(self, pack_id: str) -> bool:
-        log(f"[ensure_connected] _connected={self._connected}, _ws={self._ws is not None}")
+        logger.info(f"[ensure_connected] _connected={self._connected}, _ws={self._ws is not None}")
         
         if self._connected and self._ws:
             try:
                 await asyncio.wait_for(self._ws.ping(), timeout=2)
-                log(f"[ensure_connected] Connection alive, returning True")
+                logger.info(f"[ensure_connected] Connection alive, returning True")
                 return True
             except Exception as e:
-                log(f"[ensure_connected] Connection test failed: {e}")
+                logger.info(f"[ensure_connected] Connection test failed: {e}")
                 self._connected = False
         
-        log(f"[ensure_connected] Need to connect...")
+        logger.info(f"[ensure_connected] Need to connect...")
         if self._ws and not self._ws.closed:
             try:
                 await self._ws.close()
@@ -225,10 +223,10 @@ class RemoteTTSHandler:
         
         if self.auto_discover:
             result = await self.connect_with_discovery(pack_id)
-            log(f"[ensure_connected] connect_with_discovery returned: {result}")
+            logger.info(f"[ensure_connected] connect_with_discovery returned: {result}")
             return result
         result = await self.connect(pack_id)
-        log(f"[ensure_connected] connect returned: {result}")
+        logger.info(f"[ensure_connected] connect returned: {result}")
         return result
 
     async def synthesize(
@@ -238,13 +236,13 @@ class RemoteTTSHandler:
         params: dict,
         pack_id: str
     ) -> TTSResult:
-        log(f"Synthesize called: pack_id={pack_id}, text_len={len(text)}")
+        logger.info(f"Synthesize called: pack_id={pack_id}, text_len={len(text)}")
         if not await self.ensure_connected(pack_id):
-            log(f"Failed to ensure connection for pack {pack_id}")
+            logger.info(f"Failed to ensure connection for pack {pack_id}")
             return TTSResult(error="Not connected to server")
 
         if not self._pack_valid:
-            log(f"Pack {pack_id} not valid on server")
+            logger.info(f"Pack {pack_id} not valid on server")
             return TTSResult(error=f"Pack '{pack_id}' not valid on server")
 
         request_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
@@ -262,7 +260,7 @@ class RemoteTTSHandler:
 
         try:
             await self._ws.send(json.dumps(payload))
-            log(f"Sent synthesize request: {request_id}")
+            logger.info(f"Sent synthesize request: {request_id}")
 
             result = await asyncio.wait_for(future, timeout=params.get("timeout", 120))
 
@@ -280,7 +278,7 @@ class RemoteTTSHandler:
                         info = sf.info(str(output_path))
                         data, sr = sf.read(str(output_path), dtype="float32")
                         duration = len(data) / sr
-                        log(f"Received audio: {len(audio_data)} bytes, duration: {duration:.2f}s, sr={sr}Hz, subtype={info.subtype}")
+                        logger.info(f"Received audio: {len(audio_data)} bytes, duration: {duration:.2f}s, sr={sr}Hz, subtype={info.subtype}")
                         
                         TARGET_SR = 44100
                         if info.subtype != "PCM_16" or sr != TARGET_SR:
@@ -295,20 +293,20 @@ class RemoteTTSHandler:
                                 "-sample_fmt", "s16",
                                 pcm_path
                             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                            log(f"FFmpeg resample exit={result_ffmpeg.returncode}, {sr}Hz -> {TARGET_SR}Hz PCM_16 (cmd={ffmpeg_cmd})")
+                            logger.info(f"FFmpeg resample exit={result_ffmpeg.returncode}, {sr}Hz -> {TARGET_SR}Hz PCM_16 (cmd={ffmpeg_cmd})")
                             if result_ffmpeg.returncode == 0:
                                 output_path = Path(pcm_path)
                             else:
-                                log(f"FFmpeg failed: {result_ffmpeg.stderr.decode('utf-8', errors='ignore')[-200:]}")
+                                logger.info(f"FFmpeg failed: {result_ffmpeg.stderr.decode('utf-8', errors='ignore')[-200:]}")
                     except Exception as e:
-                        log(f"Failed to process audio: {e}")
+                        logger.info(f"Failed to process audio: {e}")
 
                     return TTSResult(audio_path=str(output_path), duration=duration)
                 else:
                     return TTSResult(error="No audio data in response")
             else:
                 error = result.get("error", "Unknown error")
-                log(f"Synthesis failed: {error}")
+                logger.info(f"Synthesis failed: {error}")
                 return TTSResult(error=error)
 
         except asyncio.TimeoutError:
@@ -316,7 +314,7 @@ class RemoteTTSHandler:
             return TTSResult(error="Request timeout")
         except Exception as e:
             self._pending_results.pop(request_id, None)
-            log(f"Synthesize error: {e}")
+            logger.info(f"Synthesize error: {e}")
             return TTSResult(error=str(e))
 
     async def get_available_packs(self) -> List[str]:
@@ -330,7 +328,7 @@ class RemoteTTSHandler:
             if data.get("type") == "packs_list":
                 return [p["pack_id"] for p in data.get("packs", []) if p.get("valid")]
         except Exception as e:
-            log(f"Failed to get packs list: {e}")
+            logger.info(f"Failed to get packs list: {e}")
 
         return self._available_packs
 
@@ -349,7 +347,7 @@ class RemoteTTSHandler:
             self._ws = None
 
         self._connected = False
-        log("Connection closed")
+        logger.info("Connection closed")
 
     @property
     def is_connected(self) -> bool:
