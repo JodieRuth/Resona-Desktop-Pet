@@ -30,7 +30,7 @@ $DISCLAIMER = @'
 *******************************************************************************
 *                                DISCLAIMER                                   *
 *******************************************************************************
-* This code is licensed under CC BY-NC-SA 4.0.                                *
+* This code is licensed under MIT License.                                    *
 * The assets downloaded by this script contain third-party copyrighted        *
 * materials (Navel / Okura Resona).                                           *
 * 1. Assets are for personal research and non-commercial use only.            *

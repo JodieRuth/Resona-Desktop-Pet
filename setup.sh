@@ -63,7 +63,7 @@ STT_URL='https://gh-proxy.com/https://github.com/k2-fsa/sherpa-onnx/releases/dow
 DISCLAIMER="*******************************************************************************
 *                                DISCLAIMER                                   *
 *******************************************************************************
-* This code is licensed under CC BY-NC-SA 4.0.                                *
+* This code is licensed under MIT License.                                    *
 * The assets downloaded by this script contain third-party copyrighted        *
 * materials (Navel / Okura Resona).                                           *
 * 1. Assets are for personal research and non-commercial use only.            *

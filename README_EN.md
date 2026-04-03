@@ -152,8 +152,7 @@ Using `trigger_editor.py`, you can configure highly personalized reaction logic.
 
 ## ⚠️ Copyright & Licensing
 
-- **Code License**: This project's source code is licensed under [CC BY-NC-SA 4.0](LICENSE) (Attribution-NonCommercial-ShareAlike).
-- **Non-Commercial Use**: Commercial use of this code, models, or related assets is strictly prohibited.
+- **Code License**: This project's source code is licensed under [MIT](LICENSE).
 - **Legal Terms**: For detailed information on disclaimers, asset attribution, and usage risks, please refer to [LEGAL.md](docs/LEGAL_EN.md).
 
 By downloading, installing, debugging, or running any content from this project/repository, you are deemed to have read and agreed to all terms in [LEGAL.md](docs/LEGAL_EN.md). If you do not agree, please stop using and delete the resources immediately.
