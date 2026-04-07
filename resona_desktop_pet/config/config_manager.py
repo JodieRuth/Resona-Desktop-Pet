@@ -206,7 +206,7 @@ class ConfigManager:
 
     @property
     def enable_time_context(self) -> bool:
-        return self.getint("Time", "enable_time_context", 1) == 1
+        return self.getint("Prompt", "enable_time_context", 1) == 1
 
     @property
     def thinking_text_enabled(self) -> bool:
@@ -904,14 +904,61 @@ class ConfigManager:
     def enable_ip_context(self) -> bool:
         return self.getboolean("Prompt", "enable_ip_context", True)
 
+    def _find_file_in_pack(self, pack_root: Path, filename: str) -> Optional[Path]:
+        if not pack_root.exists():
+            return None
+        
+        candidates = []
+        try:
+            for file_path in pack_root.rglob(filename):
+                if file_path.is_file():
+                    try:
+                        mtime = file_path.stat().st_mtime
+                        candidates.append((file_path, mtime))
+                    except Exception:
+                        candidates.append((file_path, 0))
+        except Exception as e:
+            print(f"[Config] Pack search error: {e}")
+            return None
+        
+        if not candidates:
+            return None
+        
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        return candidates[0][0]
+
     def get_prompt(self, pack_id: Optional[str] = None) -> str:
         
-        target_val = self.prompt_file_path 
+        target_val = self.prompt_file_path
         
         if self.use_pack_settings:
             target_pack_id = pack_id if pack_id else self.pack_manager.active_pack_id
-            
-            
+            pack_root = self.pack_manager.packs_dir / target_pack_id
+
+            if target_val:
+                search_filename = target_val if target_val.endswith('.txt') else target_val + '.txt'
+                default_prompt_path = self.pack_manager.get_path("logic", "prompts")
+                if default_prompt_path:
+                    prompt_dir = default_prompt_path.parent
+                    direct_path = prompt_dir / search_filename
+                    if direct_path.exists() and direct_path.is_file():
+                        print(f"[Config] Found prompt file in prompts dir: {direct_path}")
+                        return direct_path.read_text(encoding="utf-8")
+                found_file = self._find_file_in_pack(pack_root, search_filename)
+                if found_file:
+                    print(f"[Config] Found prompt file via pack search: {found_file}")
+                    return found_file.read_text(encoding="utf-8")
+                project_root = self.pack_manager.project_root
+                try:
+                    for subdir in project_root.rglob('*'):
+                        if subdir.is_dir():
+                            candidate = subdir / search_filename
+                            if candidate.exists() and candidate.is_file():
+                                print(f"[Config] Found prompt file via global search: {candidate}")
+                                return candidate.read_text(encoding="utf-8")
+                except Exception as e:
+                    print(f"[Config] Global search error: {e}")
+
             pack_data = self.pack_manager._get_pack_data(target_pack_id)
             if not pack_data:
                  raise RuntimeError(f"CRITICAL: Pack data for '{target_pack_id}' not found.")
@@ -924,50 +971,49 @@ class ConfigManager:
                 print(f"[Config] logic_info content: {logic_info}")
                 raise RuntimeError(f"CRITICAL: Pack '{target_pack_id}' has no prompts defined in its pack.json.")
             
-            target_prompt = next((p for p in prompts if p.get("id") == target_val), None)
-            
-            if not target_prompt:
-                 target_prompt = next((p for p in prompts if p.get("id") == "default"), None)
-            
+            target_prompt = next((p for p in prompts if p.get("id") == "default"), None)
             if not target_prompt:
                 target_prompt = prompts[0]
             
             rel_path = target_prompt.get("path")
-            pack_root = self.pack_manager.packs_dir / target_pack_id
             full_path = pack_root / rel_path
             
             if full_path.exists():
                 return full_path.read_text(encoding="utf-8")
-            
-            if not pack_id or pack_id == self.pack_manager.active_pack_id:
-                default_prompt_path = self.pack_manager.get_path("logic", "prompts")
-                if default_prompt_path:
-                    prompt_dir = default_prompt_path.parent
-                    legacy_path = prompt_dir / target_val
-                    if legacy_path.exists():
-                         return legacy_path.read_text(encoding="utf-8")
 
             raise RuntimeError(f"CRITICAL: Prompt file for ID '{target_val}' or path '{rel_path}' not found in pack '{target_pack_id}'.")
 
         if self.prompt_source == "string":
             return self.prompt_content
-            
+
         filename = self.prompt_file_path
         default_prompt_path = self.pack_manager.get_path("logic", "prompts")
-        
+
         if default_prompt_path:
             prompt_dir = default_prompt_path.parent
             target_path = prompt_dir / filename
-            
+
             if target_path.exists() and target_path.is_file():
                 try:
                     return target_path.read_text(encoding="utf-8")
                 except Exception as e:
                     print(f"[Config] Error reading prompt file: {e}")
-            
+
             if default_prompt_path.exists():
                 return default_prompt_path.read_text(encoding="utf-8")
-        
+
+        search_filename = filename if filename.endswith('.txt') else filename + '.txt'
+        project_root = self.pack_manager.project_root
+        try:
+            for subdir in project_root.rglob('*'):
+                if subdir.is_dir():
+                    candidate = subdir / search_filename
+                    if candidate.exists() and candidate.is_file():
+                        print(f"[Config] Found prompt file via global search: {candidate}")
+                        return candidate.read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"[Config] Global search error: {e}")
+
         raise RuntimeError(f"CRITICAL: Required prompt file '{filename}' not found in active pack and no default available.")
 
     def get_llm_config(self) -> dict:

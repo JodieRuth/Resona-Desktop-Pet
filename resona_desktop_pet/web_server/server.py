@@ -10,10 +10,13 @@ import os
 import shutil
 import time
 import websockets
+import logging
 from pathlib import Path
 from typing import Optional
 from .session_manager import SessionManager
 from resona_desktop_pet.utils.audio_utils import convert_to_wav
+
+logger = logging.getLogger("Web")
 
 app = FastAPI()
 
@@ -101,7 +104,7 @@ def resolve_idle_image(controller, pack_id: str, outfit_id: str) -> Optional[str
                         best_img = min(candidate_images, key=lambda x: (get_digit_sum(x[0]), len(x[0]), x[0]))
                         image_url = f"/packs/{pack_id}/{outfit_path}/{best_img[0]}{best_img[1]}"
     except Exception as e:
-        print(f"Error resolving idle image: {e}")
+        logger.error(f"Error resolving idle image: {e}")
         
     return image_url
 
@@ -292,7 +295,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if controller_ref and main_loop and settings:
                     if "active_pack" in settings:
                          pack_id = settings["active_pack"]
-                         print(f"Switching pack to: {pack_id}")
+                         logger.info(f"Switching pack to: {pack_id}")
                          asyncio.run_coroutine_threadsafe(
                              controller_ref.handle_web_pack_switch(pack_id, session),
                              main_loop
@@ -316,11 +319,11 @@ async def upload_audio(
 ):
     if not controller_ref:
         return JSONResponse({"error": "Backend not ready"}, status_code=503)
-    print(f"[Web] upload_audio received session_id={session_id} filename={getattr(file, 'filename', None)} content_type={getattr(file, 'content_type', None)}")
+    logger.debug(f"[Web] upload_audio received session_id={session_id} filename={getattr(file, 'filename', None)} content_type={getattr(file, 'content_type', None)}")
 
     session = session_manager.get_session(session_id)
     if not session:
-        print(f"[Web] upload_audio invalid session_id={session_id}")
+        logger.warning(f"[Web] upload_audio invalid session_id={session_id}")
         return JSONResponse({"error": "Invalid session"}, status_code=404)
 
     upload_dir = Path(controller_ref.config.html_upload_dir)
@@ -328,7 +331,7 @@ async def upload_audio(
         upload_dir = Path(controller_ref.project_root) / upload_dir
         
     upload_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[Web] upload_audio upload_dir={upload_dir}")
+    logger.debug(f"[Web] upload_audio upload_dir={upload_dir}")
     
     filename = f"web_audio_{session_id}_{int(asyncio.get_event_loop().time())}.wav"
     file_path = upload_dir / filename
@@ -340,11 +343,11 @@ async def upload_audio(
             size = file_path.stat().st_size
         except Exception:
             size = None
-        print(f"[Web] upload_audio saved file_path={file_path} size={size}")
+        logger.debug(f"[Web] upload_audio saved file_path={file_path} size={size}")
 
         converted_path = file_path.with_name(f"{file_path.stem}_converted.wav")
         ok = convert_to_wav(file_path, converted_path)
-        print(f"[Web] upload_audio convert_to_wav ok={ok} src={file_path} dst={converted_path}")
+        logger.debug(f"[Web] upload_audio convert_to_wav ok={ok} src={file_path} dst={converted_path}")
         if ok:
             file_path.unlink()
             file_path = converted_path
@@ -355,14 +358,14 @@ async def upload_audio(
                 pass
             return JSONResponse({"error": "Audio conversion failed. Ensure ffmpeg is available in PATH."}, status_code=500)
 
-        print(f"[Web] upload_audio dispatch handle_web_audio path={file_path}")
+        logger.debug(f"[Web] upload_audio dispatch handle_web_audio path={file_path}")
         asyncio.run_coroutine_threadsafe(
             controller_ref.handle_web_audio(str(file_path), session),
             main_loop
         )
         return {"status": "processing", "path": str(file_path)}
     except Exception as e:
-        print(f"[Web] upload_audio exception: {e}")
+        logger.error(f"[Web] upload_audio exception: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/")
@@ -380,7 +383,7 @@ async def get_index():
                 has_marker = "__RES_WEB_VERSION" in f.read()
         except Exception:
             pass
-        print(f"[Web] index.html marker={has_marker} size={size} mtime={mtime}")
+        logger.debug(f"[Web] index.html marker={has_marker} size={size} mtime={mtime}")
         return FileResponse(index_path, headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
@@ -418,7 +421,7 @@ async def client_log(request: Request):
         data = await request.json()
     except Exception:
         data = None
-    print(f"[Web] ClientLog: {data}")
+    logger.debug(f"[Web] ClientLog: {data}")
     return {"status": "ok"}
 
 class WebServerThread(threading.Thread):
@@ -435,7 +438,7 @@ class WebServerThread(threading.Thread):
         set_controller(self.controller, self.loop)
         
         static_path = resolve_static_path(self.controller, self.static_dir)
-        print(f"[Web] Static path: {static_path}")
+        logger.debug(f"[Web] Static path: {static_path}")
         start_udp_beacon(self.port)
         
         try:
@@ -444,9 +447,9 @@ class WebServerThread(threading.Thread):
             s.connect(("8.8.8.8", 80))
             local_ip = s.getsockname()[0]
             s.close()
-            print(f"\n[Web] Server is running! Access it from your phone at: http://{local_ip}:{self.port}\n")
+            logger.info(f"\n[Web] Server is running! Access it from your phone at: http://{local_ip}:{self.port}\n")
         except Exception:
-            print(f"\n[Web] Server is running at: http://localhost:{self.port}\n")
+            logger.info(f"\n[Web] Server is running at: http://localhost:{self.port}\n")
 
         packs_path = Path(self.controller.project_root) / "packs"
         app.mount("/packs", StaticFiles(directory=str(packs_path)), name="packs")
@@ -486,7 +489,7 @@ class ExternalWSServerThread(threading.Thread):
         try:
             async for message in websocket:
                 try:
-                    print(f"[ExternalWS] Message received: {self._format_ws_log(message)}")
+                    logger.debug(f"[ExternalWS] Message received: {self._format_ws_log(message)}")
                     data = json.loads(message)
                     if not isinstance(data, dict):
                         if self.controller.config.external_ws_return_status:
@@ -502,7 +505,7 @@ class ExternalWSServerThread(threading.Thread):
                                 "socket": websocket,
                                 "prefixes": prefixes
                             }
-                            print(f"[ExternalWS] Role registered: {role} (Prefixes: {prefixes})")
+                            logger.info(f"[ExternalWS] Role registered: {role} (Prefixes: {prefixes})")
                         if self.controller.config.external_ws_return_status:
                             await websocket.send(json.dumps({"status": "ok", "message": f"Registered as {role}"}))
                         continue
@@ -541,7 +544,7 @@ class ExternalWSServerThread(threading.Thread):
                                 target_socket = self._sockets[target]["socket"]
 
                         if not target_socket:
-                            print(f"[ExternalWS] MCP request failed: target '{target}' not connected")
+                            logger.warning(f"[ExternalWS] MCP request failed: target '{target}' not connected")
                             await websocket.send(json.dumps({"type": "mcp_response", "id": req_id, "status": "error", "message": f"Target mod '{target}' not connected"}))
                             continue
                             
@@ -555,7 +558,7 @@ class ExternalWSServerThread(threading.Thread):
                             self._pending.pop(req_id, None)
                             if target in self._sockets:
                                 del self._sockets[target]
-                            print(f"[ExternalWS] MCP request failed: send to '{target}' failed")
+                            logger.warning(f"[ExternalWS] MCP request failed: send to '{target}' failed")
                             await websocket.send(json.dumps({"type": "mcp_response", "id": req_id, "status": "error", "message": f"Send to '{target}' failed"}))
                             continue
                         try:
@@ -570,7 +573,7 @@ class ExternalWSServerThread(threading.Thread):
                         level = data.get("level", "info")
                         message_text = data.get("message", "")
                         if message_text:
-                            print(f"[ExternalWS:{level}] {message_text}")
+                            logger.debug(f"[ExternalWS:{level}] {message_text}")
                         if self.controller.config.external_ws_return_status:
                             await websocket.send(json.dumps({"status": "ok", "message": "log received"}))
                         continue
@@ -610,7 +613,7 @@ class ExternalWSServerThread(threading.Thread):
                                 "reasoning": result.get("reasoning", "")
                             }))
                         except Exception as e:
-                            print(f"[ExternalWS] llm_request failed: {e}")
+                            logger.error(f"[ExternalWS] llm_request failed: {e}")
                             await websocket.send(json.dumps({"type": "llm_response", "id": req_id, "status": "error", "message": str(e)}))
                         continue
 
@@ -618,7 +621,7 @@ class ExternalWSServerThread(threading.Thread):
                         report = data.get("report")
                         mode = data.get("mode")
                         if report:
-                            print(f"[ExternalWS] Subagent result ({mode}): {report}")
+                            logger.debug(f"[ExternalWS] Subagent result ({mode}): {report}")
                         if self.controller.llm_backend:
                             self.controller.llm_backend.set_subagent_result(mode, report)
                         if self.controller.config.external_ws_return_status:
@@ -632,12 +635,12 @@ class ExternalWSServerThread(threading.Thread):
                         continue
 
                     if self.controller.config.external_ws_ignore_if_busy and self.controller.is_busy:
-                        print(f"[ExternalWS] Program is busy, ignoring question: {question}")
+                        logger.debug(f"[ExternalWS] Program is busy, ignoring question: {question}")
                         if self.controller.config.external_ws_return_status:
                              await websocket.send(json.dumps({"status": "ignored", "message": "Program is busy"}))
                         continue
                         
-                    print(f"[ExternalWS] Question received: {question}")
+                    logger.info(f"[ExternalWS] Question received: {question}")
                     self.controller.external_query_signal.emit(question)
                     
                     if self.controller.config.external_ws_return_status:
@@ -648,14 +651,14 @@ class ExternalWSServerThread(threading.Thread):
                         await websocket.send(json.dumps({"status": "error", "message": "Invalid JSON format"}))
                     continue
         except Exception as e:
-            print(f"[ExternalWS] Connection error: {e}")
+            logger.warning(f"[ExternalWS] Connection error: {e}")
         finally:
             if role and self._sockets.get(role, {}).get("socket") == websocket:
                 del self._sockets[role]
-                print(f"[ExternalWS] Role disconnected: {role}")
+                logger.info(f"[ExternalWS] Role disconnected: {role}")
 
     async def _start_server(self):
-        print(f"[ExternalWS] Listening on ws://{self.host}:{self.port}")
+        logger.info(f"[ExternalWS] Listening on ws://{self.host}:{self.port}")
         async with websockets.serve(self._handle_connection, self.host, self.port):
             await asyncio.Future() 
 
@@ -665,4 +668,4 @@ class ExternalWSServerThread(threading.Thread):
         try:
             new_loop.run_until_complete(self._start_server())
         except Exception as e:
-            print(f"[ExternalWS] Server failed: {e}")
+            logger.error(f"[ExternalWS] Server failed: {e}")

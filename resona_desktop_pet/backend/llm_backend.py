@@ -267,7 +267,7 @@ class LLMBackend:
                 return str(res)
         except Exception as e:
             import traceback
-            logger.info(f"[SubAgent] Fatal Error: {traceback.format_exc()}")
+            logger.error(f"[SubAgent] Fatal Error: {traceback.format_exc()}")
             return f"SubAgent delegation error: {e}"
 
     def _extract_tool_calls(self, response: Any) -> List[Any]:
@@ -594,7 +594,7 @@ class LLMBackend:
                     else:
                         blocks.append(f"OCR Result:\n{ocr_text}")
             except Exception as e:
-                logger.info(f"[LLM] OCR Context Error: {e}")
+                logger.warning(f"[LLM] OCR Context Error: {e}")
 
         if process_active:
             try:
@@ -636,7 +636,7 @@ class LLMBackend:
             response.text_tts = data.get("text_tts", response.text_display)
             return response
         except json.JSONDecodeError as e:
-            logger.info(f"JSON Parse Error: {e} | Candidate: {json_str}")
+            logger.error(f"JSON Parse Error: {e} | Candidate: {json_str}")
             response.error = f"JSON parsing failed: {str(e)}"
             return response
 
@@ -757,7 +757,7 @@ class LLMBackend:
                         f.write("\n".join(usage_lines) + "\n")
 
         except Exception as e:
-            logger.info(f"[LLM] Logging error: {e}")
+            logger.warning(f"[LLM] Logging error: {e}")
 
     def _extract_usage_stats(self, response: Any) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
         usage = None

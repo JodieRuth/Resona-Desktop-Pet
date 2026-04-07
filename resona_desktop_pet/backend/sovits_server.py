@@ -10,11 +10,7 @@ from pathlib import Path
 from typing import Optional, Dict, Set
 from dataclasses import dataclass, field
 
-try:
-    import websockets
-except ImportError:
-    print("[SoVITS-Server] Error: websockets library required. Run: pip install websockets")
-    sys.exit(1)
+import websockets
 
 from .sovits_manager import SoVITSManager, set_sovits_logger
 
@@ -25,10 +21,8 @@ BROADCAST_MAGIC = "SOVITS_SERVER_ANNOUNCE"
 logger = logging.getLogger("SoVITS-Server")
 
 def setup_logger(log_file: Optional[Path] = None):
-    """Setup logger with optional file handler. Called from main.py after setup_logging."""
     logger.setLevel(logging.INFO)
     
-    # Only add file handler if not already present
     has_file_handler = any(isinstance(h, logging.FileHandler) for h in logger.handlers)
     if log_file and not has_file_handler:
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
@@ -116,7 +110,7 @@ class SoVITSServer:
                         )
                     except Exception as e:
                         if self._broadcast_running:
-                            logger.info(f"Broadcast error: {e}")
+                            logger.warning(f"Broadcast error: {e}")
                     import time
                     time.sleep(BROADCAST_INTERVAL)
 
@@ -124,7 +118,7 @@ class SoVITSServer:
             self._broadcast_thread.start()
             logger.info(f"Broadcast started on port {BROADCAST_PORT}, local IP: {self._local_ip}")
         except Exception as e:
-            logger.info(f"Failed to start broadcast: {e}")
+            logger.error(f"Failed to start broadcast: {e}")
             self.broadcast_enabled = False
 
     def _stop_broadcast(self):
@@ -159,7 +153,7 @@ class SoVITSServer:
                 sovits_model = data.get("character", {}).get("sovits_model", {})
                 version = sovits_model.get("version", "v2")
             except Exception as e:
-                logger.info(f"Failed to read pack.json in {pack_dir.name}: {e}")
+                logger.warning(f"Failed to read pack.json in {pack_dir.name}: {e}")
                 pack_id = pack_dir.name
                 version = "v2"
 
@@ -236,7 +230,7 @@ class SoVITSServer:
                     time.sleep(0.5)
                 logger.info(f"Warning: SoVITS API may not be fully ready yet")
             else:
-                logger.info(f"Failed to start SoVITS for pack: {pack_id}")
+                logger.error(f"Failed to start SoVITS for pack: {pack_id}")
 
             return success
         finally:
@@ -288,10 +282,10 @@ class SoVITSServer:
                         return await response.read()
                     else:
                         error_text = await response.text()
-                        logger.info(f"TTS API error: {response.status} - {error_text}")
+                        logger.error(f"TTS API error: {response.status} - {error_text}")
                         return None
         except Exception as e:
-            logger.info(f"TTS request failed: {e}")
+            logger.error(f"TTS request failed: {e}")
             return None
 
     async def handle_client(self, websocket, path=""):
@@ -424,7 +418,7 @@ class SoVITSServer:
                     elif f.is_dir():
                         shutil.rmtree(f)
                 except Exception as e:
-                    logger.info(f"Failed to clean {f}: {e}")
+                    logger.warning(f"Failed to clean {f}: {e}")
             logger.info("Cleaned TEMP directory")
 
         if self.default_pack:
@@ -434,7 +428,7 @@ class SoVITSServer:
                 if success:
                     logger.info(f"Default pack {self.default_pack} loaded successfully")
                 else:
-                    logger.info(f"Failed to preload default pack: {self.default_pack}")
+                    logger.warning(f"Failed to preload default pack: {self.default_pack}")
             else:
                 logger.info(f"Default pack {self.default_pack} not found or invalid, skipping preload")
         else:
@@ -446,7 +440,7 @@ class SoVITSServer:
                 if success:
                     logger.info(f"Auto-loaded pack: {auto_pack}")
                 else:
-                    logger.info(f"Failed to auto-load pack: {auto_pack}")
+                    logger.warning(f"Failed to auto-load pack: {auto_pack}")
 
         self._start_broadcast()
 

@@ -2,6 +2,9 @@ import numpy as np
 from pathlib import Path
 from typing import List, Optional, Tuple
 import json
+import logging
+
+logger = logging.getLogger("Memory")
 
 
 class VectorStore:
@@ -36,7 +39,7 @@ class VectorStore:
                     str(self.model_path),
                     file_name=self.model_file
                 )
-                print(f"[VectorStore] Loaded ONNX model via optimum: {self.model_file}")
+                logger.info(f"[VectorStore] Loaded ONNX model via optimum: {self.model_file}")
 
             except ImportError:
                 import onnxruntime as ort
@@ -52,10 +55,10 @@ class VectorStore:
                 self.session = ort.InferenceSession(str(model_file_path))
                 self.model = self  
 
-                print(f"[VectorStore] Loaded ONNX model via onnxruntime: {self.model_file}")
+                logger.info(f"[VectorStore] Loaded ONNX model via onnxruntime: {self.model_file}")
 
         except Exception as e:
-            print(f"[VectorStore] Failed to load model: {e}")
+            logger.info(f"[VectorStore] Failed to load model: {e}")
 
     def is_loaded(self) -> bool:
         return self.model is not None and self.tokenizer is not None

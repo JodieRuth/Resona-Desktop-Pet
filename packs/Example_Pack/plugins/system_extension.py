@@ -3,6 +3,9 @@
 import os
 import subprocess
 import psutil
+import logging
+
+logger = logging.getLogger("Plugin")
 
 # 插件元数据：供 TriggerEditor 识别并自动生成 UI
 INFO = {
@@ -53,4 +56,4 @@ def execute_action(action_id, params):
             # 执行黑盒逻辑：强制杀死进程
             subprocess.run(f"taskkill /f /im {p_name}", shell=True, capture_output=True)
         except Exception as e:
-            print(f"[Plugin] Failed to kill {p_name}: {e}")
+            logger.warning(f"[Plugin] Failed to kill {p_name}: {e}")

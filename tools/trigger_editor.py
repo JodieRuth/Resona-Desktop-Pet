@@ -8,6 +8,9 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QDoubleSpinBox, QSpinBox, QCheckBox, QComboBox, QTreeWidget,
                              QTreeWidgetItem, QFormLayout, QMessageBox, QTextEdit, QStatusBar)
 from PySide6.QtCore import Qt
+import logging
+
+logger = logging.getLogger("Tools")
 
 TRANSLATIONS = {
     "AND": {"label": "所有条件满足(AND)", "fields": []},
@@ -295,22 +298,21 @@ class TriggerEditor(QMainWindow):
         self.statusBar().showMessage(f"已成功保存至 {self.active_pack_id}", 3000)
 
     def auto_save(self):
-        """自动保存功能，每次修改后立即保存"""
         if not self.active_pack_id:
-            print("自动保存失败: active_pack_id 为空")
+            logger.info("自动保存失败: active_pack_id 为空")
             return
         path = self.project_root / "packs" / self.active_pack_id / "logic" / "triggers.json"
-        print(f"正在尝试保存到: {path}")
-        print(f"当前触发器数据: {self.current_triggers}")
+        logger.info(f"正在尝试保存到: {path}")
+        logger.info(f"当前触发器数据: {self.current_triggers}")
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            print(f"目录已确保存在: {path.parent}")
+            logger.info(f"目录已确保存在: {path.parent}")
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(self.current_triggers, f, indent=4, ensure_ascii=False)
-            print(f"数据已成功保存到: {path}")
-            print(f"保存的数据长度: {len(self.current_triggers)}")
+            logger.info(f"数据已成功保存到: {path}")
+            logger.info(f"保存的数据长度: {len(self.current_triggers)}")
         except Exception as e:
-            print(f"自动保存失败: {e}")
+            logger.info(f"自动保存失败: {e}")
             import traceback
             traceback.print_exc()
 
@@ -371,7 +373,7 @@ class TriggerEditor(QMainWindow):
             if "logic" in c:
                 item = QTreeWidgetItem(parent, [f"【逻辑组】{c['logic']}", ""])
                 item.setData(0, Qt.ItemDataRole.UserRole, c)
-                print(f"渲染条件组: {c}, ID: {id(c)}")
+                logger.info(f"渲染条件组: {c}, ID: {id(c)}")
                 self._render_recursive_conds(c.get("conditions", []), item)
             else:
                 label = COND_TYPES.get(c["type"], {}).get("label", c["type"])
@@ -385,7 +387,7 @@ class TriggerEditor(QMainWindow):
                                 break
                 item = QTreeWidgetItem(parent, [label, str(c)])
                 item.setData(0, Qt.ItemDataRole.UserRole, c)
-                print(f"渲染条件: {c}, ID: {id(c)}")
+                logger.info(f"渲染条件: {c}, ID: {id(c)}")
 
     def _render_acts(self, actions, parent):
         for a in actions:
@@ -401,7 +403,7 @@ class TriggerEditor(QMainWindow):
 
             item = QTreeWidgetItem(parent, [label, str(a)])
             item.setData(0, Qt.ItemDataRole.UserRole, a)
-            print(f"渲染动作: {a}, ID: {id(a)}")
+            logger.info(f"渲染动作: {a}, ID: {id(a)}")
 
     def on_cond_clicked(self, item):
         data = item.data(0, Qt.ItemDataRole.UserRole)
@@ -476,17 +478,17 @@ class TriggerEditor(QMainWindow):
             tree_item.setData(1, Qt.ItemDataRole.UserRole, {"index": index_in_parent, "parent_data": None, "is_action": is_action})
 
         def update_main_data_structure_by_indices(key, value):
-            print(f"通过索引更新主数据结构: key={key}, value={value}")
+            logger.info(f"通过索引更新主数据结构: key={key}, value={value}")
             index_info = tree_item.data(1, Qt.ItemDataRole.UserRole)
             if not index_info:
-                print("错误: 无法获取索引信息")
+                logger.info("错误: 无法获取索引信息")
                 return
 
             index = index_info["index"]
             parent_data = index_info["parent_data"]
             is_action = index_info["is_action"]
 
-            print(f"索引信息: index={index}, parent_data={parent_data}, is_action={is_action}")
+            logger.info(f"索引信息: index={index}, parent_data={parent_data}, is_action={is_action}")
 
             if parent_data:
                 for trig_idx, trigger in enumerate(self.current_triggers):
@@ -495,7 +497,7 @@ class TriggerEditor(QMainWindow):
                             if condition is parent_data:
                                 if "conditions" in condition and index < len(condition["conditions"]):
                                     condition["conditions"][index][key] = value
-                                    print(f"更新嵌套条件[{trig_idx}][{cond_idx}][{index}]的{key}为{value}")
+                                    logger.info(f"更新嵌套条件[{trig_idx}][{cond_idx}][{index}]的{key}为{value}")
                                     self.auto_save()
                                     return
             else:
@@ -504,17 +506,17 @@ class TriggerEditor(QMainWindow):
                     if is_action:
                         if "actions" in trigger and index < len(trigger["actions"]):
                             trigger["actions"][index][key] = value
-                            print(f"更新动作[{self.selected_index}][{index}]的{key}为{value}")
+                            logger.info(f"更新动作[{self.selected_index}][{index}]的{key}为{value}")
                             self.auto_save()
                             return
                     else:
                         if "conditions" in trigger and index < len(trigger["conditions"]):
                             trigger["conditions"][index][key] = value
-                            print(f"更新条件[{self.selected_index}][{index}]的{key}为{value}")
+                            logger.info(f"更新条件[{self.selected_index}][{index}]的{key}为{value}")
                             self.auto_save()
                             return
 
-            print("警告: 未能根据索引找到要更新的数据")
+            logger.info("警告: 未能根据索引找到要更新的数据")
 
         for key in fields:
             val = data.get(key)
@@ -603,15 +605,15 @@ class TriggerEditor(QMainWindow):
                 self.prop_form.addRow(f"{label}:", edit)
 
     def _update_base_val(self, key, val):
-        print(f"更新基础值: key={key}, val={val}, selected_index={self.selected_index}")
+        logger.info(f"更新基础值: key={key}, val={val}, selected_index={self.selected_index}")
         if self.selected_index >= 0:
-            print(f"更新前触发器[{self.selected_index}]: {self.current_triggers[self.selected_index]}")
+            logger.info(f"更新前触发器[{self.selected_index}]: {self.current_triggers[self.selected_index]}")
             self.current_triggers[self.selected_index][key] = val
-            print(f"更新后触发器[{self.selected_index}]: {self.current_triggers[self.selected_index]}")
+            logger.info(f"更新后触发器[{self.selected_index}]: {self.current_triggers[self.selected_index]}")
             if key == "id": self.refresh_list()
             self.auto_save()  
         else:
-            print("警告: selected_index 小于0，无法更新基础值")
+            logger.info("警告: selected_index 小于0，无法更新基础值")
 
 
     def add_condition(self):

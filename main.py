@@ -70,7 +70,7 @@ class AudioPlayer(QObject):
             logger.info("[AudioPlayer] Audio output device refreshed to system default")
             return True
         except Exception as e:
-            logger.info(f"[AudioPlayer] Failed to refresh audio device: {e}")
+            logger.warning(f"[AudioPlayer] Failed to refresh audio device: {e}")
             return False
 
 class TimerScheduler(QObject):
@@ -134,7 +134,7 @@ class TimerScheduler(QObject):
             if isinstance(data, list):
                 return data
         except Exception as e:
-            logger.info(f"[Timer] Failed to read {path}: {e}")
+            logger.warning(f"[Timer] Failed to read {path}: {e}")
         return []
 
     def _write_json(self, path: Path, data: list):
@@ -144,7 +144,7 @@ class TimerScheduler(QObject):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.info(f"[Timer] Failed to write {path}: {e}")
+            logger.warning(f"[Timer] Failed to write {path}: {e}")
 
     def _normalize_task(self, entry: dict, now: float) -> dict:
         task_id = entry.get("id") or f"timer_{int(now * 1000)}_{random.randint(1000, 9999)}"
@@ -372,7 +372,7 @@ class TimerScheduler(QObject):
             else:
                 task["status"] = "failed"
                 task["error"] = error or getattr(result, "error", "unknown_error")
-                logger.info(f"[Timer] Synth failed. id={task_id} error={task.get('error')}")
+                logger.error(f"[Timer] Synth failed. id={task_id} error={task.get('error')}")
             updated = True
             break
         if updated:
@@ -443,7 +443,7 @@ class ApplicationController(QObject):
                 logger.info("[Main] GPU detection timed out on pnputil.")
             except Exception as ps_e:
                 if not output.strip():
-                    logger.info(f"[Main] GPU detection failed (pnputil): {ps_e}")
+                    logger.warning(f"[Main] GPU detection failed (pnputil): {ps_e}")
 
             output_up = output.upper()
             has_nvidia = "NVIDIA" in output_up
@@ -467,7 +467,7 @@ class ApplicationController(QObject):
                 logger.info("[Main] No known discrete GPU detected (Intel or Unknown). GPU monitoring disabled.")
                 self.can_monitor_gpu = False
         except Exception as e:
-            logger.info(f"[Main] GPU detection skipped or failed: {e}")
+            logger.warning(f"[Main] GPU detection skipped or failed: {e}")
 
         self._stt_ready = False
         self._last_llm_response = None
@@ -533,7 +533,7 @@ class ApplicationController(QObject):
             try:
                 future.result(timeout=self.config.mcp_startup_timeout + 5)
             except Exception as e:
-                logger.info(f"[Main] MCP startup failed: {e}")
+                logger.error(f"[Main] MCP startup failed: {e}")
         
         if hasattr(self.config, 'memory_enabled') and self.config.memory_enabled and self.config.memory_startup_processing:
             logger.info("[Main] Scheduling startup memory processing...")
@@ -561,7 +561,7 @@ class ApplicationController(QObject):
                 self.debug_panel.request_manual_response.connect(self.handle_manual_debug_response)
                 QTimer.singleShot(1000, lambda: self._add_debug_to_tray())
             except Exception as e:
-                logger.info(f"[Main] Failed to initialize DebugPanel: {e}")
+                logger.warning(f"[Main] Failed to initialize DebugPanel: {e}")
 
         self.main_window.stats["total_clicks"] = self.state.get("total_clicks", 0)
         
@@ -652,41 +652,41 @@ class ApplicationController(QObject):
                     self.sovits_ready.emit(True, f"SoVITS service ready (attempt {attempt}/{self._sovits_max_attempts})")
                     return
                 else:
-                    logger.info(f"[Main] SoVITS startup attempt {attempt} failed: start() returned False")
+                    logger.warning(f"[Main] SoVITS startup attempt {attempt} failed: start() returned False")
                     if manager.process:
                         try:
                             manager.stop()
                         except:
                             pass
             except Exception as e:
-                logger.info(f"[Main] SoVITS startup attempt {attempt} exception: {e}")
+                logger.warning(f"[Main] SoVITS startup attempt {attempt} exception: {e}")
             
             if attempt < self._sovits_max_attempts:
                 logger.info(f"[Main] Retrying SoVITS startup in 2 seconds...")
                 time.sleep(2)
         
-        logger.info(f"[Main] SoVITS startup failed after {self._sovits_max_attempts} attempts.")
+        logger.error(f"[Main] SoVITS startup failed after {self._sovits_max_attempts} attempts.")
         self.sovits_ready.emit(False, f"SoVITS service startup failed after {self._sovits_max_attempts} attempts")
     
     def _on_sovits_ready(self, success: bool, message: str):
         if success:
             self._sovits_ready = True
             logger.info(f"[Main] SoVITS ready: {message}")
-            print(f"[Main] {message}")
+            logger.info(f"[Main] {message}")
             
             if self._pending_tts_requests:
-                print(f"[Main] Processing {len(self._pending_tts_requests)} pending TTS request(s)...")
+                logger.info(f"[Main] Processing {len(self._pending_tts_requests)} pending TTS request(s)...")
                 for req in self._pending_tts_requests:
                     text, emotion, language, queued_at = req
                     delay = time.time() - queued_at
-                    print(f"[Main] Sending delayed TTS request (delayed {delay:.2f}s): '{text[:30]}...'")
+                    logger.info(f"[Main] Sending delayed TTS request (delayed {delay:.2f}s): '{text[:30]}...'")
                     asyncio.run_coroutine_threadsafe(
                         self._generate_tts_internal(text, emotion, language),
                         self._loop
                     )
                 self._pending_tts_requests.clear()
         else:
-            logger.info(f"[Main] SoVITS failed: {message}")
+            logger.error(f"[Main] SoVITS failed: {message}")
             self._pending_tts_requests.clear()
             QMessageBox.critical(None, "SoVITS Startup Failed", 
                 f"Failed to start GPT-SoVITS service.\n\n{message}\n\nPlease check your configuration.")
@@ -699,7 +699,7 @@ class ApplicationController(QObject):
             logger.info(f"[Main] Registering global show hotkey: {g_hotkey}")
             keyboard.add_hotkey(g_hotkey, lambda: self.request_global_show.emit())
         except Exception as e:
-            logger.info(f"[Main] Failed to register global show hotkey: {e}")
+            logger.warning(f"[Main] Failed to register global show hotkey: {e}")
 
         if self.config.stt_enabled:
             logger.info("[Main] Initializing STT hotkey and loading model...")
@@ -712,7 +712,7 @@ class ApplicationController(QObject):
             if hasattr(self, 'tray_icon'):
                 self.tray_icon.add_menu_action("Dev Control Panel", self.debug_panel.show)
         except Exception as e:
-            logger.info(f"[Main] Tray integration for debug panel failed: {e}")
+            logger.warning(f"[Main] Tray integration for debug panel failed: {e}")
 
     def handle_manual_debug_response(self, data):
         response = data["response"]
@@ -733,7 +733,7 @@ class ApplicationController(QObject):
             logger.info("[Main] STT Model loaded and ready.")
             self._stt_ready = True
         else:
-            logger.info("[Main] STT Model loading FAILED.")
+            logger.error("[Main] STT Model loading FAILED.")
     def _force_unlock(self):
         if self.is_busy:
             logger.info("[Watchdog] BUSY state timeout! Force unlocking to prevent freeze.")
@@ -950,7 +950,7 @@ class ApplicationController(QObject):
             })
             
         except Exception as e:
-            logger.info(f"[Web] Pack switch failed: {e}")
+            logger.error(f"[Web] Pack switch failed: {e}")
             await session.websocket.send_json({"type": "error", "message": f"Pack switch failed: {str(e)}"})
 
     async def handle_web_start_recording(self, session: ClientSession):
@@ -1033,7 +1033,7 @@ class ApplicationController(QObject):
             res = None
             logger.info(f"[Web] handle_web_audio stt timeout after {timeout_sec}s")
         if res:
-            logger.info(f"[Web] handle_web_audio stt done error={res.error} text_len={len(res.text) if res and res.text else 0}")
+            logger.debug(f"[Web] handle_web_audio stt done error={res.error} text_len={len(res.text) if res and res.text else 0}")
         
         try:
             os.remove(file_path)
@@ -1063,7 +1063,6 @@ class ApplicationController(QObject):
              await self.handle_web_query(res.text, session)
 
     def _handle_user_query(self, text: str):
-        print(f"[Main] _handle_user_query called with: '{text}' (thread: {threading.current_thread().name})")
         logger.info(f"[Main] _handle_user_query called with: '{text}' (thread: {threading.current_thread().name})")
         if not text.strip(): return
 
@@ -1083,13 +1082,13 @@ class ApplicationController(QObject):
             response = await self.llm_backend.query(text, pack_id=self.config.pack_manager.active_pack_id, source="desktop")
             self.llm_response_ready.emit(response)
         except Exception as e:
-            logger.info(f"[Main] LLM query failed: {e}")
+            logger.error(f"[Main] LLM query failed: {e}")
             from resona_desktop_pet.backend.llm_backend import LLMResponse
             self.llm_response_ready.emit(LLMResponse(error=str(e)))
 
     def _handle_llm_response(self, response):
         self._last_llm_response = response
-        logger.info(f"[Main] LLM response returned. Error={response.error}")
+        logger.debug(f"[Main] LLM response returned. Error={response.error}")
         
         self._current_watchdog_interval = (self.config.sovits_timeout + 15) * 1000
         if self._busy_watchdog.isActive():
@@ -1103,7 +1102,7 @@ class ApplicationController(QObject):
         tts_lang_for_trigger = getattr(response, 'tts_lang', None)
         self._trigger_voice_response(response.text_display, response.emotion, None, tts_text=response.text_tts, tts_lang=tts_lang_for_trigger)
     def _handle_tts_ready(self, result):
-        logger.info(f"[Main] TTS synthesized ready. Success={not result.error}")
+        logger.debug(f"[Main] TTS synthesized ready. Success={not result.error}")
         if self._drop_tts_results or self._pack_switch_pending:
             logger.info("[Main] Dropping TTS result due to pack switch.")
             return
@@ -1125,7 +1124,7 @@ class ApplicationController(QObject):
             self.main_window.on_audio_complete()
             self._busy_watchdog.stop()
         except OverflowError as e:
-            logger.info(f"[Main] OverflowError in _on_audio_finished: {e}")
+            logger.error(f"[Main] OverflowError in _on_audio_finished: {e}")
             self._is_chain_executing = False
 
     def _start_web_server(self):
@@ -1143,7 +1142,7 @@ class ApplicationController(QObject):
             self.web_server_thread.start()
             logger.info(f"[Main] Web server started on {self.config.html_host}:{self.config.html_port}")
         except Exception as e:
-            logger.info(f"[Main] Failed to start web server: {e}")
+            logger.error(f"[Main] Failed to start web server: {e}")
 
     def _start_external_ws_server(self):
         try:
@@ -1157,7 +1156,7 @@ class ApplicationController(QObject):
             self.external_ws_thread.start()
             logger.info(f"[Main] External WebSocket server started on {self.config.external_ws_host}:{self.config.external_ws_port}")
         except Exception as e:
-            logger.info(f"[Main] Failed to start external WS server: {e}")
+            logger.error(f"[Main] Failed to start external WS server: {e}")
 
     def _trigger_voice_response(self, text, emotion, voice_file=None, is_behavior=False, tts_text=None, tts_lang=None):
         if is_behavior and self.config.disable_actions:
@@ -1198,7 +1197,7 @@ class ApplicationController(QObject):
         if self.config.sovits_enabled and self.config.sovits_mode == "local" and not self._sovits_ready:
             queued_at = time.time()
             self._pending_tts_requests.append((text, emotion, language, queued_at))
-            print(f"[Main] TTS request queued (SoVITS not ready): '{text[:30]}...'")
+            logger.info(f"[Main] TTS request queued (SoVITS not ready): '{text[:30]}...'")
             return
         
         await self._generate_tts_internal(text, emotion, language)
@@ -1290,7 +1289,7 @@ class ApplicationController(QObject):
             response = await self.llm_backend.query_idle(prompt, pack_id=self.config.pack_manager.active_pack_id)
             self.llm_response_ready.emit(response)
         except Exception as e:
-            logger.info(f"[Main] Idle LLM query failed: {e}")
+            logger.error(f"[Main] Idle LLM query failed: {e}")
             from resona_desktop_pet.backend.llm_backend import LLMResponse
             self.llm_response_ready.emit(LLMResponse(error=str(e)))
 
@@ -1375,7 +1374,7 @@ class ApplicationController(QObject):
                     delay_ms = int(sec * 1000)
                     QTimer.singleShot(delay_ms, execute_next)
                 except (ValueError, TypeError, OverflowError) as e:
-                    logger.info(f"[Main] Delay action parameter error: {action.get('sec')}, error: {e}")
+                    logger.warning(f"[Main] Delay action parameter error: {action.get('sec')}, error: {e}")
 
                     execute_next()
                 return
@@ -1536,8 +1535,8 @@ class ApplicationController(QObject):
                 self.main_window.refresh_from_config()
                 self.main_window.manual_show()
             except Exception as e:
-                print(f"[PackSwitch] ERROR during pre-refresh: {e}")
-                traceback.print_exc()
+                logger.error(f"[PackSwitch] ERROR during pre-refresh: {e}")
+                logger.error(traceback.format_exc())
         else:
             logger.info("[PackSwitch] Deferring UI refresh until SoVITS ready")
         
@@ -1556,26 +1555,26 @@ class ApplicationController(QObject):
         if self.config.sovits_enabled:
             def wait_for_sovits_then_show():
                 if self.sovits_manager.is_running():
-                    print("[PackSwitch] SoVITS is already running, skipping restart.")
+                    logger.info("[PackSwitch] SoVITS is already running, skipping restart.")
                     self.tts_backend.reload_config()
                     self.pack_switch_ready.emit()
                     return
 
-                print("[PackSwitch] Starting SoVITS and waiting for API...")
+                logger.info("[PackSwitch] Starting SoVITS and waiting for API...")
                 try:
                     success = self.sovits_manager.start(timeout=60, kill_existing=True)
-                    print(f"[PackSwitch] SoVITS start finished. Success={success}")
+                    logger.info(f"[PackSwitch] SoVITS start finished. Success={success}")
                     self.pack_switch_ready.emit()
                 except Exception as e:
-                    print(f"[PackSwitch] CRITICAL ERROR in wait_for_sovits_then_show: {e}")
-                    traceback.print_exc()
+                    logger.error(f"[PackSwitch] CRITICAL ERROR in wait_for_sovits_then_show: {e}")
+                    logger.error(traceback.format_exc())
                     self.pack_switch_ready.emit()
             
             thread = threading.Thread(target=wait_for_sovits_then_show, daemon=True)
-            print(f"[PackSwitch] Starting background thread: {thread.name}")
+            logger.info(f"[PackSwitch] Starting background thread: {thread.name}")
             thread.start()
         else:
-            print("[PackSwitch] SoVITS disabled, emitting signal directly.")
+            logger.info("[PackSwitch] SoVITS disabled, emitting signal directly.")
             self.pack_switch_ready.emit()
 
     def _check_pack_switch_ready(self):
@@ -1594,7 +1593,7 @@ class ApplicationController(QObject):
             self._finalize_ui_after_pack_change()
 
     def _finalize_ui_after_pack_change(self):
-        print("[PackSwitch] Finalizing UI refresh (triggered by signal)...")
+        logger.info("[PackSwitch] Finalizing UI refresh (triggered by signal)...")
         try:
             if self._pack_switch_wait_timer.isActive():
                 self._pack_switch_wait_timer.stop()
@@ -1603,7 +1602,7 @@ class ApplicationController(QObject):
             self.config.load()
             if hasattr(self, "timer_scheduler"):
                 self.timer_scheduler.refresh_config()
-            print(f"[PackSwitch] Finalize config: active_pack={self.config.get('General','active_pack','')} default_outfit={self.config.default_outfit}")
+            logger.info(f"[PackSwitch] Finalize config: active_pack={self.config.get('General','active_pack','')} default_outfit={self.config.default_outfit}")
             self.main_window.refresh_from_config()
             
             if hasattr(self, 'tray_icon'):
@@ -1611,10 +1610,10 @@ class ApplicationController(QObject):
                 self.tray_icon.show()
                 
             self.main_window.manual_show()
-            print("[PackSwitch] Pack switch UI refresh complete.")
+            logger.info("[PackSwitch] Pack switch UI refresh complete.")
         except Exception as e:
-            print(f"[PackSwitch] ERROR during UI finalize: {e}")
-            traceback.print_exc()
+            logger.error(f"[PackSwitch] ERROR during UI finalize: {e}")
+            logger.error(traceback.format_exc())
     def _show_error_response(self, error_type, details=""):
         error_config_path = self.config.pack_manager.get_path("logic", "error_config")
         text, emotion, audio = f"Error: {details}", "<E:sad>", None
@@ -1645,7 +1644,7 @@ class ApplicationController(QObject):
         if output_success and input_success:
             logger.info("[Main] Audio devices refreshed successfully")
         else:
-            logger.info("[Main] Failed to refresh some audio devices")
+            logger.warning("[Main] Failed to refresh some audio devices")
     def _handle_stt_request(self):
         if not self._stt_ready or not self.stt_backend:
             logger.info("[STT] STT not ready or not available, ignoring request.")
@@ -1659,7 +1658,7 @@ class ApplicationController(QObject):
         asyncio.run_coroutine_threadsafe(self.stt_backend.start_recording(on_complete=lambda r: self.stt_result_ready.emit(r)), self._loop)
     def _handle_stt_result(self, result):
         if result.error:
-            logger.info(f"[STT] Error: {result.error}")
+            logger.error(f"[STT] Error: {result.error}")
         logger.info(f"[STT] Result: '{result.text}'")
         self.main_window.set_listening(False)
         self.main_window.set_input_locked(False)
@@ -1685,7 +1684,7 @@ class ApplicationController(QObject):
                     data = await r.json()
                     city = data.get("city")
                     if not city:
-                        logger.info(f"[Weather] Location failed: {data.get('message', 'Unknown error')}")
+                        logger.warning(f"[Weather] Location failed: {data.get('message', 'Unknown error')}")
                         return
                 logger.info(f"[Weather] Located city: {city}. Fetching weather data...")
                 url = f"http://api.weatherapi.com/v1/current.json?key={self.config.weather_api_key}&q={city}&lang=zh"
@@ -1698,9 +1697,9 @@ class ApplicationController(QObject):
                         }
                         logger.info(f"[Weather] SUCCESS: {self.current_weather['condition']}, {self.current_weather['temp']}°C")
                     else:
-                        logger.info(f"[Weather] API error: Status {r.status}")
+                        logger.error(f"[Weather] API error: Status {r.status}")
         except Exception as e:
-            logger.info(f"[Weather] Service error: {e}")
+            logger.error(f"[Weather] Service error: {e}")
     
     async def _process_startup_memory(self):
         """Process startup memory"""
@@ -1708,7 +1707,7 @@ class ApplicationController(QObject):
             processor = StartupProcessor(self.project_root, self.config)
             await processor.process_startup()
         except Exception as e:
-            logger.info(f"[Main] Error processing startup memory: {e}")
+            logger.error(f"[Main] Error processing startup memory: {e}")
     
     def _run_loop(self):
         asyncio.set_event_loop(self._loop)
@@ -1726,9 +1725,9 @@ class ApplicationController(QObject):
             if connected:
                 logger.info("[Main] Remote SoVITS connected successfully")
             else:
-                logger.info("[Main] Failed to connect to remote SoVITS server")
+                logger.error("[Main] Failed to connect to remote SoVITS server")
         except Exception as e:
-            logger.info(f"[Main] Error connecting to remote SoVITS: {e}")
+            logger.error(f"[Main] Error connecting to remote SoVITS: {e}")
     def _cleanup_temp_dir(self):
         import shutil
         temp_dir = self.project_root / "TEMP"
@@ -1822,7 +1821,7 @@ class ApplicationController(QObject):
                         self.memory_manager.save_temp_session(user_msg, assistant_msg)
                         logger.info("[Main] Temporary session saved for startup processing")
             except Exception as e:
-                logger.info(f"[Main] Error saving temporary session: {e}")
+                logger.error(f"[Main] Error saving temporary session: {e}")
 
         def _cleanup_task():
             if self._mocker_process:
@@ -1929,3 +1928,6 @@ def main():
     sys.exit(app.exec())
 if __name__ == "__main__":
     main()
+#你先别问我为什么写得这么逆天，我就问你能不能跑吧
+#只要能动，里面到底是个八音盒还是个废料场真的很重要吗
+#不要试图去理解我在想什么，我也不知道昨天的我在想什么，最好也不要让LLM来

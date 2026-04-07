@@ -8,6 +8,9 @@ import configparser
 import websockets
 
 from mcp.server.fastmcp import FastMCP
+import logging
+
+logger = logging.getLogger("MCP")
 
 mcp = FastMCP("MinecraftMCP")
 
@@ -35,7 +38,7 @@ class ExternalWsMcpClient:
                 async with websockets.connect(uri) as ws:
                     self._ws = ws
                     self._connected.set()
-                    print(f"[MinecraftMCP] ExternalWS connected: {uri}")
+                    logger.info(f"[MinecraftMCP] ExternalWS connected: {uri}")
                     await ws.send(json.dumps({"type": "mcp_register", "role": "mcp_client"}))
                     async for message in ws:
                         try:
@@ -46,7 +49,7 @@ class ExternalWsMcpClient:
                             continue
                         if data.get("type") != "mcp_response":
                             if data.get("status") or data.get("message"):
-                                print(f"[MinecraftMCP] ExternalWS status: {data}")
+                                logger.info(f"[MinecraftMCP] ExternalWS status: {data}")
                             continue
                         req_id = data.get("id")
                         if not req_id:
@@ -59,7 +62,7 @@ class ExternalWsMcpClient:
             except Exception:
                 self._connected.clear()
                 self._ws = None
-                print(f"[MinecraftMCP] ExternalWS disconnected, retrying...")
+                logger.info(f"[MinecraftMCP] ExternalWS disconnected, retrying...")
                 await asyncio.sleep(1.0)
 
     def call(self, action: str, payload: dict, timeout: float = 2.5):
@@ -118,7 +121,7 @@ class MinecraftMcpConnector:
         self._external_ws_port = 12345
         self._ws_client = None
         self._load_config()
-        print(f"[MinecraftMCP] ExternalWS host={self._external_ws_host} port={self._external_ws_port}")
+        logger.info(f"[MinecraftMCP] ExternalWS host={self._external_ws_host} port={self._external_ws_port}")
 
     def _load_config(self):
         root = Path(__file__).resolve().parents[1]
@@ -139,7 +142,7 @@ class MinecraftMcpConnector:
         now = time.time()
         if now - self._last_no_instance_log > 3.0:
             self._last_no_instance_log = now
-            print(f"[MinecraftMCP] No websocket response from {self._external_ws_host}:{self._external_ws_port}")
+            logger.info(f"[MinecraftMCP] No websocket response from {self._external_ws_host}:{self._external_ws_port}")
         return {
             "status": "no_connection",
             "message": "no websocket response",

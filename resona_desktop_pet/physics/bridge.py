@@ -5,6 +5,9 @@ import ctypes
 from PySide6.QtCore import QObject, QTimer, QPoint, QRect, Qt
 from .engine import PhysicsEngine
 from .env_scanner import EnvironmentScanner
+import logging
+
+logger = logging.getLogger("Physics")
 
 class PhysicsBridge(QObject):
     def __init__(self, target_window, config):
@@ -96,7 +99,7 @@ class PhysicsBridge(QObject):
         if not hasattr(self, "_tick_count"): self._tick_count = 0
         self._tick_count += 1
         if self._tick_count % 300 == 0:
-            pass # print(f"[Physics] Tick {self._tick_count}: pos=({self.engine.x:.1f}, {self.engine.y:.1f}), v=({self.engine.vx:.1f}, {self.engine.vy:.1f})")
+            pass # logger.info(f"[Physics] Tick {self._tick_count}: pos=({self.engine.x:.1f}, {self.engine.y:.1f}), v=({self.engine.vx:.1f}, {self.engine.vy:.1f})")
 
         sprite_rect = self._get_sprite_rect()
         window_pos = self.target.frameGeometry().topLeft()

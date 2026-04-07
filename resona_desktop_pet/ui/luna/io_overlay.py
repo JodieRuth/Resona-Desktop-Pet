@@ -4,6 +4,9 @@ from PySide6.QtWidgets import QWidget, QTextEdit, QLabel, QFrame, QGraphicsDropS
 from typing import Optional
 import os
 from pathlib import Path
+import logging
+
+logger = logging.getLogger("UI")
 
 class IOOverlay(QWidget):
 
@@ -286,11 +289,11 @@ class IOOverlay(QWidget):
                         families = QFontDatabase.applicationFontFamilies(font_id)
                         if families:
                             self._font_loaded_family = families[0]
-                            print(f"[IOOverlay] Loaded custom font: {self._font_loaded_family}")
+                            logger.info(f"[IOOverlay] Loaded custom font: {self._font_loaded_family}")
                     else:
-                        print(f"[IOOverlay] Failed to load font: {target_font_path}")
+                        logger.warning(f"[IOOverlay] Failed to load font: {target_font_path}")
                 else:
-                    print(f"[IOOverlay] Font file not found: {target_font_path}")
+                    logger.warning(f"[IOOverlay] Font file not found: {target_font_path}")
 
         h = self.height()
         header_h = max(18, h // 5)
@@ -359,21 +362,21 @@ class IOOverlay(QWidget):
 
         path_str = str(path)
         if not path.exists():
-            print(f"[IOOverlay] Dialog background image not found: {path_str}")
+            logger.warning(f"[IOOverlay] Dialog background image not found: {path_str}")
             self._dialog_bg_pixmap = None
             self._dialog_bg_path = None
             return False
 
         pixmap = QPixmap(path_str)
         if pixmap.isNull():
-            print(f"[IOOverlay] Failed to load dialog background image: {path_str}")
+            logger.warning(f"[IOOverlay] Failed to load dialog background image: {path_str}")
             self._dialog_bg_pixmap = None
             self._dialog_bg_path = None
             return False
 
         self._dialog_bg_pixmap = pixmap
         self._dialog_bg_path = image_path
-        print(f"[IOOverlay] Loaded dialog background image: {path_str} ({pixmap.width()}x{pixmap.height()})")
+        logger.info(f"[IOOverlay] Loaded dialog background image: {path_str} ({pixmap.width()}x{pixmap.height()})")
         return True
 
     def paintEvent(self, event: QPaintEvent):
@@ -386,7 +389,7 @@ class IOOverlay(QWidget):
                 cfg = self.parent().config
                 use_image_bg = self._load_dialog_background(cfg)
         except Exception as e:
-            print(f"[IOOverlay] Error loading dialog background: {e}")
+            logger.error(f"[IOOverlay] Error loading dialog background: {e}")
 
         if use_image_bg and self._dialog_bg_pixmap is not None:
             image_opacity = 100
@@ -443,7 +446,7 @@ class IOOverlay(QWidget):
         return super().eventFilter(obj, event)
 
     def dragEnterEvent(self, event):
-        print(f"[IOOverlay] dragEnterEvent")
+        logger.debug(f"[IOOverlay] dragEnterEvent")
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
@@ -452,7 +455,7 @@ class IOOverlay(QWidget):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
-        print(f"[IOOverlay] dropEvent")
+        logger.debug(f"[IOOverlay] dropEvent")
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
             for url in event.mimeData().urls():
@@ -467,4 +470,4 @@ class IOOverlay(QWidget):
                             "ext": path.suffix.lower() if path.suffix else ""
                         }
                         self.file_dropped.emit(file_info)
-                        print(f"[IOOverlay] File dropped: {file_info}")
+                        logger.info(f"[IOOverlay] File dropped: {file_info}")

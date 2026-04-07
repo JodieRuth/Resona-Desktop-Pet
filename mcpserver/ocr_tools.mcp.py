@@ -6,6 +6,9 @@ from pathlib import Path
 import requests
 from PIL import ImageGrab
 from mcp.server.fastmcp import FastMCP
+import logging
+
+logger = logging.getLogger("MCP")
 
 mcp = FastMCP("OcrTools")
 
@@ -121,18 +124,18 @@ if __name__ == "__main__":
         if cfg_path.exists():
             config = _load_ocr_config(cfg_path)
             if not config.get("enabled", False):
-                print(f"OCR not enabled in {cfg_path}, exiting.", file=sys.stderr)
+                logger.info(f"OCR not enabled in {cfg_path}, exiting.", file=sys.stderr)
                 sys.exit(1)
             
             provider = config.get("provider")
             if provider == "baidu" and (not config.get("api_key") or not config.get("secret_key")):
-                print("Missing Baidu API config, exiting.", file=sys.stderr)
+                logger.info("Missing Baidu API config, exiting.", file=sys.stderr)
                 sys.exit(1)
             elif provider == "tencent" and (not config.get("secret_id") or not config.get("secret_key")):
-                print("Missing Tencent API config, exiting.", file=sys.stderr)
+                logger.info("Missing Tencent API config, exiting.", file=sys.stderr)
                 sys.exit(1)
     except Exception as e:
-        print(f"Config check failed: {e}", file=sys.stderr)
+        logger.error(f"Config check failed: {e}", file=sys.stderr)
         sys.exit(1)
 
     mcp.run()

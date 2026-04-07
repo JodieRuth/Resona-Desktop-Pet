@@ -88,7 +88,7 @@ class RemoteTTSHandler:
             logger.info(f"Discovery listener started on port {BROADCAST_PORT}")
             return True
         except Exception as e:
-            logger.info(f"Failed to start discovery listener: {e}")
+            logger.error(f"Failed to start discovery listener: {e}")
             return False
 
     def _stop_discovery_listener(self):
@@ -128,7 +128,7 @@ class RemoteTTSHandler:
 
     async def connect(self, pack_id: str) -> bool:
         if websockets is None:
-            logger.info("Error: websockets library not installed")
+            logger.error("Error: websockets library not installed")
             return False
 
         try:
@@ -160,13 +160,13 @@ class RemoteTTSHandler:
                 return False
 
         except asyncio.TimeoutError:
-            logger.info("Connection failed: handshake timeout")
+            logger.error("Connection failed: handshake timeout")
             self._connected = False
             return False
         except Exception as e:
-            logger.info(f"Connection failed: {e}")
+            logger.error(f"Connection failed: {e}")
             import traceback
-            logger.info(f"Connection error traceback: {traceback.format_exc()}")
+            logger.error(f"Connection error traceback: {traceback.format_exc()}")
             self._connected = False
             return False
 
@@ -184,7 +184,7 @@ class RemoteTTSHandler:
                             if not future.done():
                                 future.set_result(data)
                 except Exception as e:
-                    logger.info(f"Error processing message: {e}")
+                    logger.warning(f"Error processing message: {e}")
         except asyncio.CancelledError:
             logger.info("Receive loop cancelled")
             raise
@@ -192,7 +192,7 @@ class RemoteTTSHandler:
             logger.info("Connection closed by server")
             self._connected = False
         except Exception as e:
-            logger.info(f"Receive loop error: {e}")
+            logger.warning(f"Receive loop error: {e}")
             self._connected = False
 
     async def ensure_connected(self, pack_id: str) -> bool:
@@ -204,7 +204,7 @@ class RemoteTTSHandler:
                 logger.info(f"[ensure_connected] Connection alive, returning True")
                 return True
             except Exception as e:
-                logger.info(f"[ensure_connected] Connection test failed: {e}")
+                logger.warning(f"[ensure_connected] Connection test failed: {e}")
                 self._connected = False
         
         logger.info(f"[ensure_connected] Need to connect...")
@@ -238,7 +238,7 @@ class RemoteTTSHandler:
     ) -> TTSResult:
         logger.info(f"Synthesize called: pack_id={pack_id}, text_len={len(text)}")
         if not await self.ensure_connected(pack_id):
-            logger.info(f"Failed to ensure connection for pack {pack_id}")
+            logger.error(f"Failed to ensure connection for pack {pack_id}")
             return TTSResult(error="Not connected to server")
 
         if not self._pack_valid:
@@ -297,16 +297,16 @@ class RemoteTTSHandler:
                             if result_ffmpeg.returncode == 0:
                                 output_path = Path(pcm_path)
                             else:
-                                logger.info(f"FFmpeg failed: {result_ffmpeg.stderr.decode('utf-8', errors='ignore')[-200:]}")
+                                logger.error(f"FFmpeg failed: {result_ffmpeg.stderr.decode('utf-8', errors='ignore')[-200:]}")
                     except Exception as e:
-                        logger.info(f"Failed to process audio: {e}")
+                        logger.error(f"Failed to process audio: {e}")
 
                     return TTSResult(audio_path=str(output_path), duration=duration)
                 else:
                     return TTSResult(error="No audio data in response")
             else:
                 error = result.get("error", "Unknown error")
-                logger.info(f"Synthesis failed: {error}")
+                logger.error(f"Synthesis failed: {error}")
                 return TTSResult(error=error)
 
         except asyncio.TimeoutError:
@@ -314,7 +314,7 @@ class RemoteTTSHandler:
             return TTSResult(error="Request timeout")
         except Exception as e:
             self._pending_results.pop(request_id, None)
-            logger.info(f"Synthesize error: {e}")
+            logger.error(f"Synthesize error: {e}")
             return TTSResult(error=str(e))
 
     async def get_available_packs(self) -> List[str]:
@@ -328,7 +328,7 @@ class RemoteTTSHandler:
             if data.get("type") == "packs_list":
                 return [p["pack_id"] for p in data.get("packs", []) if p.get("valid")]
         except Exception as e:
-            logger.info(f"Failed to get packs list: {e}")
+            logger.error(f"Failed to get packs list: {e}")
 
         return self._available_packs
 

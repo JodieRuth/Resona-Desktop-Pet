@@ -60,7 +60,7 @@ class STTBackend:
             logger.info(f"Download complete: {target_path}")
             return target_path
         except Exception as e:
-            logger.info(f"Download failed: {e}")
+            logger.error(f"Download failed: {e}")
             if target_path.exists(): target_path.unlink()
             return None
 
@@ -124,7 +124,7 @@ class STTBackend:
             logger.info("SenseVoice model loaded successfully.")
             return True
         except Exception as e: 
-            logger.info(f"Failed to initialize sherpa-onnx: {e}")
+            logger.error(f"Failed to initialize sherpa-onnx: {e}")
             return False
 
     async def _extract_model(self, archive_path: Path, target_dir: Path) -> None:
@@ -137,7 +137,7 @@ class STTBackend:
             with tarfile.open(archive_path, "r:bz2") as tar: tar.extractall(target_dir)
             logger.info("Extraction complete.")
         except Exception as e:
-            logger.info(f"Extraction failed: {e}")
+            logger.error(f"Extraction failed: {e}")
 
     def register_hotkey(self, callback: Callable[[], None]) -> bool:
         if self._hotkey_registered: return True
@@ -149,7 +149,7 @@ class STTBackend:
             logger.info("STT hotkey registered successfully.")
             return True
         except Exception as e:
-            logger.info(f"Failed to register STT hotkey: {e}")
+            logger.warning(f"Failed to register STT hotkey: {e}")
             return False
 
     def unregister_hotkey(self) -> None:
@@ -213,7 +213,7 @@ class STTBackend:
             if on_complete: on_complete(result)
         except Exception as e:
             self._is_recording = False
-            logger.info(f"Recording error: {e}")
+            logger.error(f"Recording error: {e}")
             if on_complete: on_complete(STTResult(error=str(e)))
 
     def recognize_file(self, file_path: str) -> STTResult:
@@ -258,7 +258,7 @@ class STTBackend:
             return STTResult(text=text)
 
         except Exception as e:
-            logger.info(f"File recognition error: {e}")
+            logger.error(f"File recognition error: {e}")
             return STTResult(error=str(e))
 
     def _recognize_audio(self) -> STTResult:
@@ -281,7 +281,7 @@ class STTBackend:
             text = stream.result.text.strip()
             return STTResult(text=text, duration=len(audio_float) / self._sample_rate)
         except Exception as e:
-            logger.info(f"Recognition error: {e}")
+            logger.error(f"Recognition error: {e}")
             return STTResult(error=str(e))
 
     def stop_recording(self) -> None: self._is_recording = False
@@ -297,5 +297,5 @@ class STTBackend:
             logger.info("[STT] Audio input device refreshed to system default")
             return True
         except Exception as e:
-            logger.info(f"[STT] Failed to refresh audio device: {e}")
+            logger.warning(f"[STT] Failed to refresh audio device: {e}")
             return False

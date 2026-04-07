@@ -38,12 +38,24 @@ class BehaviorMonitor(QThread):
         self.last_music_title = ""
         self._last_mock_data = {}
         self.plugin_status_cache = {}
-        self.dropped_file_cache = None  
+        self.dropped_file_cache = None
+        self._pynvml_handle = None
+        self._pynvml_available = None
         self.load_triggers()
 
     def on_file_dropped(self, file_info: dict):
         self.dropped_file_cache = file_info
         logger.info(f"[Behavior] File dropped: name={file_info.get('name')}, ext={file_info.get('ext')}")
+
+    def _cleanup_pid_history(self, current_pids: dict):
+        now_time = time.time()
+        cutoff_time = now_time - 1800
+        dead_pids = [
+            pid for pid, info in self.pid_history.items()
+            if pid not in current_pids and info.get("last_seen", 0) < cutoff_time
+        ]
+        for pid in dead_pids:
+            del self.pid_history[pid]
 
     def _poll_plugins(self):
         pm = self.config.pack_manager
@@ -75,6 +87,13 @@ class BehaviorMonitor(QThread):
                 self.plugin_status_cache[pid] = (False, "error", 0.0)
 
     def load_triggers(self):
+        resolved_triggers = self.config.pack_manager.get_resolved_triggers()
+        if resolved_triggers is not None:
+            self.triggers = resolved_triggers
+            resolved_count = sum(1 for t in self.triggers for a in t.get("actions", []) if "_resolved_abs_path" in a)
+            logger.info(f"[Behavior] Loaded {len(self.triggers)} triggers from pack (with {resolved_count} resolved voice files).")
+            return
+        
         trigger_path = self.config.pack_manager.get_path("logic", "triggers")
         logger.info(f"[Behavior] Loading triggers from: {trigger_path}")
         if trigger_path and trigger_path.exists():
@@ -88,6 +107,17 @@ class BehaviorMonitor(QThread):
             logger.error(f"[Behavior] Trigger path missing or not found: {trigger_path}")
     def stop(self):
         self.running = False
+        self._cleanup_pynvml()
+
+    def _cleanup_pynvml(self):
+        if self._pynvml_handle is not None:
+            try:
+                import pynvml
+                pynvml.nvmlShutdown()
+                logger.debug("[Behavior] pynvml shutdown successfully")
+            except Exception:
+                pass
+            self._pynvml_handle = None
     def run(self):
         while self.running:
             try:
@@ -118,14 +148,19 @@ class BehaviorMonitor(QThread):
                         self.fullscreen_status_changed.emit(is_fs)
 
                     current_pids = {}
+                    now_time = time.time()
                     for p in psutil.process_iter(['name', 'pid', 'create_time']):
                         try:
                             pid = p.info['pid']; pn = p.info['name'].lower()
                             current_pids[pid] = pn
                             if pid not in self.pid_history:
-                                self.pid_history[pid] = {"name": pn, "start_time": p.info['create_time']}
-                        except: continue
+                                self.pid_history[pid] = {"name": pn, "start_time": p.info['create_time'], "last_seen": now_time}
+                            else:
+                                self.pid_history[pid]["last_seen"] = now_time
+                        except Exception:
+                            continue
                     self.active_processes = set(current_pids.values())
+                    self._cleanup_pid_history(current_pids)
 
                     clip_text = m.get("clip_text", "")
                     clip_changed_text = clip_text if clip_text != self._last_mock_data.get("clip_text") else ""
@@ -159,14 +194,19 @@ class BehaviorMonitor(QThread):
 
         try:
             current_pids = {}
+            now_time = time.time()
             for p in psutil.process_iter(['name', 'pid', 'create_time']):
                 try:
                     pid = p.info['pid']; pn = p.info['name'].lower()
                     current_pids[pid] = pn
                     if pid not in self.pid_history:
-                        self.pid_history[pid] = {"name": pn, "start_time": p.info['create_time']}
-                except: continue
+                        self.pid_history[pid] = {"name": pn, "start_time": p.info['create_time'], "last_seen": now_time}
+                    else:
+                        self.pid_history[pid]["last_seen"] = now_time
+                except Exception:
+                    continue
             self.active_processes = set(current_pids.values())
+            self._cleanup_pid_history(current_pids)
             hwnd = ctypes.windll.user32.GetForegroundWindow()
             win_info = self._get_window_info(hwnd)
             idle_time = self._get_idle_time()
@@ -470,27 +510,43 @@ class BehaviorMonitor(QThread):
             stats["cpu_usage"] = psutil.cpu_percent()
             if hasattr(psutil, "sensors_temperatures"):
                 t = psutil.sensors_temperatures()
-                if 'coretemp' in t: stats["cpu_temp"] = t['coretemp'][0].current
-        except: pass
+                if 'coretemp' in t:
+                    stats["cpu_temp"] = t['coretemp'][0].current
+        except Exception:
+            pass
 
         if not getattr(self.controller, "can_monitor_gpu", True):
             return stats
 
-        try:
-            import pynvml
-            pynvml.nvmlInit()
-            h = pynvml.nvmlDeviceGetHandleByIndex(0)
-            stats["gpu_temp"] = pynvml.nvmlDeviceGetTemperature(h, 0)
-            stats["gpu_usage"] = pynvml.nvmlDeviceGetUtilizationRates(h).gpu
-            pynvml.nvmlShutdown()
-        except:
+        if self._pynvml_available is not False:
+            try:
+                import pynvml
+                if self._pynvml_handle is None:
+                    pynvml.nvmlInit()
+                    self._pynvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                    self._pynvml_available = True
+                stats["gpu_temp"] = pynvml.nvmlDeviceGetTemperature(self._pynvml_handle, 0)
+                stats["gpu_usage"] = pynvml.nvmlDeviceGetUtilizationRates(self._pynvml_handle).gpu
+            except Exception:
+                self._pynvml_available = False
+                self._pynvml_handle = None
+                try:
+                    import GPUtil
+                    gpus = GPUtil.getGPUs()
+                    if gpus:
+                        stats["gpu_temp"] = gpus[0].temperature
+                        stats["gpu_usage"] = gpus[0].load * 100
+                except Exception:
+                    pass
+        else:
             try:
                 import GPUtil
                 gpus = GPUtil.getGPUs()
                 if gpus:
                     stats["gpu_temp"] = gpus[0].temperature
                     stats["gpu_usage"] = gpus[0].load * 100
-            except: pass
+            except Exception:
+                pass
         return stats
     def _get_clipboard(self):
         if not self.config.monitor_clipboard: return ""

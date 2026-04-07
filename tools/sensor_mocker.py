@@ -6,11 +6,14 @@ from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QFormLayout, 
                              QSlider, QSpinBox, QDoubleSpinBox, QLineEdit, QLabel, QGroupBox, QCheckBox)
 from PySide6.QtCore import Qt, QTimer
+import logging
+
+logger = logging.getLogger("Tools")
 
 class SensorMocker(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Resona 全量传感器模拟器 (DEBUG MODE)")
+        self.setWindowTitle("传感器模拟器 (DEBUG MODE)")
         self.resize(500, 800)
         self.project_root = Path(__file__).parent.parent
         self.mock_file = self.project_root / "TEMP" / "mock_data.json"
@@ -70,7 +73,7 @@ class SensorMocker(QMainWindow):
                         
                         self.plugin_controls[pid] = (cb, le, sb)
             except Exception as e:
-                print(f"Error loading plugin for mocker: {e}")
+                logger.warning(f"Error loading plugin for mocker: {e}")
         
         if self.plugin_controls:
             self.centralWidget().layout().addWidget(plugin_group)

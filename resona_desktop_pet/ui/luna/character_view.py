@@ -6,6 +6,9 @@ from typing import Dict, List, Optional
 from PySide6.QtCore import Qt, QSize, QRect, Signal, QPoint
 from PySide6.QtGui import QPainter, QPaintEvent, QMouseEvent, QPixmap, QColor
 from PySide6.QtWidgets import QWidget
+import logging
+
+logger = logging.getLogger("UI")
 
 class CharacterView(QWidget):
     leftClicked = Signal()
@@ -26,7 +29,7 @@ class CharacterView(QWidget):
         self.project_root = project_root
         self.emotion_map = {}
         self.current_outfit = default_outfit
-        print(f"[CharacterView] Setup with outfit: {default_outfit}")
+        logger.info(f"[CharacterView] Setup with outfit: {default_outfit}")
         self._load_outfit(self.current_outfit)
 
     def _resolve_pack_outfit(self, requested: str) -> str:
@@ -41,10 +44,10 @@ class CharacterView(QWidget):
                     fallback = next((o for o in outfits if o.get("is_default")), outfits[0])
                     fallback_id = fallback.get("id")
                     if fallback_id:
-                        print(f"[CharacterView] Outfit not in pack: {requested}, fallback: {fallback_id}")
+                        logger.info(f"[CharacterView] Outfit not in pack: {requested}, fallback: {fallback_id}")
                         return fallback_id
         except Exception as e:
-            print(f"[CharacterView] Error resolving outfit id: {e}")
+            logger.error(f"[CharacterView] Error resolving outfit id: {e}")
         return requested
         
     def _get_outfit_path(self, outfit: str, verbose: bool = False) -> Path:
@@ -62,17 +65,17 @@ class CharacterView(QWidget):
                     if rel_path:
                         candidate = Path(rel_path)
                         outfit_path = candidate if candidate.is_absolute() else pack_root / rel_path
-                        if verbose: print(f"[CharacterView] Checking pack outfit path: {outfit_path}")
+                        if verbose: logger.info(f"[CharacterView] Checking pack outfit path: {outfit_path}")
                         if outfit_path.exists() and (outfit_path / "sum.json").exists():
-                            if verbose: print(f"[CharacterView] Using pack outfit path: {outfit_path}")
+                            if verbose: logger.info(f"[CharacterView] Using pack outfit path: {outfit_path}")
                             return outfit_path
                 pack_outfit_path = pack_root / "assets" / "sprites" / outfit
-                if verbose: print(f"[CharacterView] Checking pack outfit path: {pack_outfit_path}")
+                if verbose: logger.info(f"[CharacterView] Checking pack outfit path: {pack_outfit_path}")
                 if pack_outfit_path.exists() and (pack_outfit_path / "sum.json").exists():
-                    if verbose: print(f"[CharacterView] Using pack outfit path: {pack_outfit_path}")
+                    if verbose: logger.info(f"[CharacterView] Using pack outfit path: {pack_outfit_path}")
                     return pack_outfit_path
         except Exception as e:
-            print(f"[CharacterView] Error resolving outfit path: {e}")
+            logger.error(f"[CharacterView] Error resolving outfit path: {e}")
             pass
         return self.project_root / "resona_desktop_pet" / "ui" / "assets" / "modes" / outfit
 
@@ -109,7 +112,7 @@ class CharacterView(QWidget):
     def _load_outfit(self, outfit: str) -> bool:
         resolved = self._resolve_pack_outfit(outfit)
         outfit_path = self._get_outfit_path(resolved, verbose=True)
-        print(f"[CharacterView] Loading outfit from: {outfit_path}")
+        logger.info(f"[CharacterView] Loading outfit from: {outfit_path}")
         sum_json = outfit_path / "sum.json"
         if not sum_json.exists(): return False
         try:
@@ -182,7 +185,7 @@ class CharacterView(QWidget):
         event.ignore()
 
     def dragEnterEvent(self, event):
-        print(f"[CharacterView] dragEnterEvent")
+        logger.debug(f"[CharacterView] dragEnterEvent")
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
@@ -191,7 +194,7 @@ class CharacterView(QWidget):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
-        print(f"[CharacterView] dropEvent")
+        logger.info(f"[CharacterView] dropEvent")
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
             parent = self.parent()

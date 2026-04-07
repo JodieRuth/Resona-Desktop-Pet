@@ -1,6 +1,9 @@
 import subprocess
 from pathlib import Path
 import os
+import logging
+
+logger = logging.getLogger("Audio")
 
 def convert_to_wav(input_path: str, output_path: str, target_sr: int = 16000) -> bool:
     try:
@@ -22,15 +25,15 @@ def convert_to_wav(input_path: str, output_path: str, target_sr: int = 16000) ->
         )
         
         if result.returncode != 0:
-            print(f"[AudioUtils] FFmpeg conversion failed: {result.stderr.decode('utf-8', errors='ignore')}")
+            logger.error(f"[AudioUtils] FFmpeg conversion failed: {result.stderr.decode('utf-8', errors='ignore')}")
             return False
             
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            print(f"[AudioUtils] Output file missing or empty: {output_path}")
+            logger.info(f"[AudioUtils] Output file missing or empty: {output_path}")
             return False
             
         return True
         
     except Exception as e:
-        print(f"[AudioUtils] Exception during audio conversion: {e}")
+        logger.error(f"[AudioUtils] Exception during audio conversion: {e}")
         return False

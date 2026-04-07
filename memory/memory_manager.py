@@ -3,10 +3,13 @@ import json
 import sqlite3
 import uuid
 import time
+import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
 from memory.vector_store import VectorStore
+
+logger = logging.getLogger("Memory")
 
 
 class MemoryManager:
@@ -30,13 +33,13 @@ class MemoryManager:
         model_path = self.project_root / self.config.get("Memory", "vector_model_path", fallback="memory/sentence-transformers")
         model_file = self.config.get("Memory", "vector_model_file", fallback="model.onnx")
 
-        print(f"[MemoryManager] Initializing vector store...")
+        logger.info(f"[MemoryManager] Initializing vector store...")
         store = VectorStore(model_path, model_file)
         if store.is_loaded():
-            print(f"[MemoryManager] Vector store initialized successfully")
+            logger.info(f"[MemoryManager] Vector store initialized successfully")
             return store
         else:
-            print(f"[MemoryManager] Vector store failed to initialize")
+            logger.warning(f"[MemoryManager] Vector store failed to initialize")
         return None
     
     def _load_soul_content(self) -> str:
@@ -120,7 +123,7 @@ class MemoryManager:
                 vec = self.vector_store.encode_single(content)
                 vector = self.vector_store.to_bytes(vec)
             except Exception as e:
-                print(f"[Memory] Vector encoding failed: {e}")
+                logger.warning(f"[Memory] Vector encoding failed: {e}")
                 vector = b""
         else:
             vector = b""
@@ -176,9 +179,9 @@ class MemoryManager:
                 conn.commit()
 
                 if deleted_count > 0:
-                    print(f"[Memory] Cleaned up {deleted_count} old conversations (older than {retention_days} days) for pack: {pack_id}")
+                    logger.info(f"[Memory] Cleaned up {deleted_count} old conversations (older than {retention_days} days) for pack: {pack_id}")
         except Exception as e:
-            print(f"[Memory] Error cleaning up old conversations: {e}")
+            logger.error(f"[Memory] Error cleaning up old conversations: {e}")
     
     def delete_memory(self, pack_id: str, memory_uuid: str) -> bool:
         db_path = self.get_db_path(pack_id, "vector")

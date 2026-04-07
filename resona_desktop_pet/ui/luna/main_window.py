@@ -16,6 +16,9 @@ else:
     PhysicsBridge = None
 from .character_view import CharacterView
 from .io_overlay import IOOverlay
+import logging
+
+logger = logging.getLogger("UI")
 
 class MainWindow(QWidget):
     request_query = Signal(str)
@@ -186,9 +189,9 @@ class MainWindow(QWidget):
                             self.thinking_texts = [item.get("text", "") for item in data if isinstance(item, dict)]
                         else:
                             self.thinking_texts = [str(item) for item in data]
-                print(f"[UI] Loaded {len(self.thinking_texts)} thinking texts")
+                logger.info(f"[UI] Loaded {len(self.thinking_texts)} thinking texts")
             except Exception as e:
-                print(f"Error loading thinking texts: {e}")
+                logger.warning(f"Error loading thinking texts: {e}")
 
     def load_listening_texts(self):
         listening_path = self.config.pack_manager.get_path("logic", "listening")
@@ -202,9 +205,9 @@ class MainWindow(QWidget):
                             self.listening_texts = [item.get("text", "") for item in data if isinstance(item, dict)]
                         else:
                             self.listening_texts = [str(item) for item in data]
-                print(f"[UI] Loaded {len(self.listening_texts)} listening texts")
+                logger.info(f"[UI] Loaded {len(self.listening_texts)} listening texts")
             except Exception as e:
-                print(f"Error loading listening texts: {e}")
+                logger.warning(f"Error loading listening texts: {e}")
 
     def on_input_text_changed(self, text: str):
         if self.is_listening:
@@ -469,7 +472,7 @@ class MainWindow(QWidget):
     def refresh_from_config(self):
         try:
             pack_id = getattr(self.config.pack_manager, "active_pack_id", "")
-            print(f"[UI] Starting refresh_from_config... pack={pack_id} outfit={self.config.default_outfit}")
+            logger.info(f"[UI] Starting refresh_from_config... pack={pack_id} outfit={self.config.default_outfit}")
             self.character.setup(self.project_root, self.config.default_outfit)
             self.character.set_emotion("<E:smile>", deterministic=True)
             
@@ -499,9 +502,9 @@ class MainWindow(QWidget):
             else:
                 self.sync_window_to_sprite()
             
-            print(f"[UI] refresh_from_config completed successfully.")
+            logger.info(f"[UI] refresh_from_config completed successfully.")
         except Exception as e:
-            print(f"[UI] ERROR in refresh_from_config: {e}")
+            logger.error(f"[UI] ERROR in refresh_from_config: {e}")
             import traceback
             traceback.print_exc()
         
@@ -731,7 +734,7 @@ class MainWindow(QWidget):
     def manual_show(self):
         controller = getattr(self, "controller", None)
         if controller and getattr(controller, "_pack_switch_pending", False):
-            print("[UI] manual_show blocked during pack switch")
+            logger.info("[UI] manual_show blocked during pack switch")
             return
         self.manual_hidden = False
         self.cancel_idle_fade()
@@ -760,7 +763,7 @@ class MainWindow(QWidget):
         try:
             self.character.set_outfit(outfit)
         except Exception as e:
-            print(f"Error switching outfit: {e}")
+            logger.error(f"Error switching outfit: {e}")
             
     def show_context_menu(self):
         menu = QMenu(self)
@@ -816,35 +819,35 @@ class MainWindow(QWidget):
             grp.addAction(action)
 
     def _on_pack_selected(self, pack_id: str):
-        print(f"[UI] Pack menu selected: {pack_id}")
+        logger.info(f"[UI] Pack menu selected: {pack_id}")
         self.pack_changed.emit(pack_id)
         if self._pack_change_handler_connected:
             return
         controller = getattr(self, "controller", None)
         if controller and hasattr(controller, "_handle_pack_change"):
-            print("[UI] Pack handler not connected, invoking controller directly.")
+            logger.warning("[UI] Pack handler not connected, invoking controller directly.")
             controller._handle_pack_change(pack_id)
-        print(f"[UI] Fallback refresh scheduled for pack: {pack_id}")
+        logger.info(f"[UI] Fallback refresh scheduled for pack: {pack_id}")
         QTimer.singleShot(2000, lambda pid=pack_id: self._fallback_refresh_after_pack_change(pid))
 
     def _fallback_refresh_after_pack_change(self, pack_id: str):
         try:
             controller = getattr(self, "controller", None)
             if controller and getattr(controller, "_pack_switch_pending", False):
-                print(f"[UI] Fallback skipped: pack switch pending for {pack_id}")
+                logger.warning(f"[UI] Fallback skipped: pack switch pending for {pack_id}")
                 return
             current_id = getattr(self.config.pack_manager, "active_pack_id", "")
             if current_id != pack_id:
-                print(f"[UI] Fallback syncing pack_id: {current_id} -> {pack_id}")
+                logger.info(f"[UI] Fallback syncing pack_id: {current_id} -> {pack_id}")
                 self.config.pack_manager.set_active_pack(pack_id)
                 self.config.set("General", "active_pack", pack_id)
                 self.config.save()
             self.config.load()
-            print(f"[UI] Fallback refresh_from_config... pack={pack_id} outfit={self.config.default_outfit}")
+            logger.info(f"[UI] Fallback refresh_from_config... pack={pack_id} outfit={self.config.default_outfit}")
             self.refresh_from_config()
             self.manual_show()
         except Exception as e:
-            print(f"[UI] Fallback refresh error: {e}")
+            logger.error(f"[UI] Fallback refresh error: {e}")
 
     def populate_pack_menu(self, menu: QMenu):
         packs = self.config.pack_manager.get_available_packs()
@@ -905,7 +908,7 @@ class MainWindow(QWidget):
         
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
-            print(f"[UI] dragEnterEvent received URLs: {[u.toLocalFile() for u in event.mimeData().urls()]}")
+            logger.debug(f"[UI] dragEnterEvent received URLs: {[u.toLocalFile() for u in event.mimeData().urls()]}")
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event):
@@ -914,7 +917,7 @@ class MainWindow(QWidget):
 
     def dropEvent(self, event):
         if event.mimeData().hasUrls():
-            print(f"[UI] dropEvent received URLs")
+            logger.info(f"[UI] dropEvent received URLs")
             for url in event.mimeData().urls():
                 if url.isLocalFile():
                     file_path = url.toLocalFile()
@@ -927,7 +930,7 @@ class MainWindow(QWidget):
                             "ext": path.suffix.lower() if path.suffix else ""
                         }
                         self.file_dropped.emit(file_info)
-                        print(f"[UI] File dropped: {file_info}")
+                        logger.debug(f"[UI] File dropped: {file_info}")
             event.acceptProposedAction()
 
     def on_file_dropped(self, file_info: dict):
@@ -988,7 +991,7 @@ class MainWindow(QWidget):
                             "stem": path.stem,
                             "ext": path.suffix.lower() if path.suffix else ""
                         }
-                        print(f"[UI] Windows native drop: {file_info}")
+                        logger.info(f"[UI] Windows native drop: {file_info}")
                         self.on_file_dropped(file_info)
                 ctypes.windll.shell32.DragFinish(hdrop)
                 return True, 0

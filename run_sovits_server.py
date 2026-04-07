@@ -10,6 +10,9 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from resona_desktop_pet.backend.sovits_server import run_server
+import logging
+
+logger = logging.getLogger("SoVITS-Server")
 
 
 def load_config(project_root: Path) -> dict:
@@ -121,18 +124,18 @@ Config file (config.cfg) is automatically loaded:
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     log_file = log_dir / f"sovits_server_{timestamp}.log"
 
-    print("=" * 60)
-    print("SoVITS WebSocket Server")
-    print("=" * 60)
-    print(f"Project Root: {root}")
-    print(f"WebSocket Port: {port}")
-    print(f"SoVITS API Port: {sovits_api_port}")
-    print(f"Device: {device}")
-    print(f"Broadcast: {'Enabled' if broadcast_enabled else 'Disabled'}")
-    print(f"Default Pack: {default_pack or 'auto-select'}")
-    print(f"Log File: {log_file}")
-    print("=" * 60)
-    print("\nPress Ctrl+C to stop the server.\n")
+    logger.info("=" * 60)
+    logger.info("SoVITS WebSocket Server")
+    logger.info("=" * 60)
+    logger.info(f"Project Root: {root}")
+    logger.info(f"WebSocket Port: {port}")
+    logger.info(f"SoVITS API Port: {sovits_api_port}")
+    logger.info(f"Device: {device}")
+    logger.info(f"Broadcast: {'Enabled' if broadcast_enabled else 'Disabled'}")
+    logger.info(f"Default Pack: {default_pack or 'auto-select'}")
+    logger.info(f"Log File: {log_file}")
+    logger.info("=" * 60)
+    logger.info("\nPress Ctrl+C to stop the server.\n")
 
     try:
         run_server(
@@ -145,9 +148,9 @@ Config file (config.cfg) is automatically loaded:
             default_pack=default_pack
         )
     except KeyboardInterrupt:
-        print("\n[Server] Shutting down...")
+        logger.info("\n[Server] Shutting down...")
     except Exception as e:
-        print(f"\n[Server] Error: {e}")
+        logger.error(f"\n[Server] Error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

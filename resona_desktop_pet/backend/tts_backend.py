@@ -49,7 +49,7 @@ class TTSBackend:
                     self.emotions_cache[target_pack] = data
                     return data
             except Exception as e:
-                logger.info(f"[TTS] CRITICAL: Error loading pack emotions.json: {e}")
+                logger.error(f"[TTS] CRITICAL: Error loading pack emotions.json: {e}")
         else:
             logger.info(f"[TTS] Emotions config missing: {json_path}")
         self.emotions_cache[target_pack] = {}
@@ -74,11 +74,28 @@ class TTSBackend:
         return config.get(target, {})
 
     def _resolve_ref_audio_path(self, ref_wav: str, pack_id: Optional[str] = None) -> Path:
+        target_pack = pack_id if pack_id else getattr(self.config.pack_manager, "active_pack_id", "")
+        
+        emotions = self.config.pack_manager.get_resolved_emotions(target_pack)
+        if emotions:
+            for emotion_config in emotions.values():
+                if emotion_config.get("ref_wav") == ref_wav and "_resolved_abs_path" in emotion_config:
+                    resolved_path = Path(emotion_config["_resolved_abs_path"])
+                    if resolved_path.exists():
+                        return resolved_path
+        
         pack_emotion_dir = self.config.pack_manager.get_path("audio", "emotion_dir", pack_id=pack_id)
         if pack_emotion_dir:
             path = pack_emotion_dir / ref_wav
             if path.exists():
                 return path
+        
+        resolved_path = self.config.pack_manager.resolve_resource_path(
+            target_pack, ref_wav, search_extensions=[".wav", ".mp3", ".ogg"]
+        )
+        if resolved_path:
+            return resolved_path
+        
         raise FileNotFoundError(f"Reference audio {ref_wav} not found.")
     def _log_sovits_params(self, payload: dict):
         log_file_path = self.sovits_log_path if self.sovits_log_path else self.project_root / "sovits_log.txt"
@@ -132,7 +149,7 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
     async def _synthesize_remote(self, text: str, emotion: str, language: Optional[str], pack_id: Optional[str]) -> TTSResult:
         logger.info(f"[_synthesize_remote] Called with pack_id={pack_id}")
         if not self._remote_handler:
-            logger.info("[_synthesize_remote] Error: Remote handler not initialized")
+            logger.error("[_synthesize_remote] Error: Remote handler not initialized")
             return TTSResult(error="Remote handler not initialized")
 
         target_pack = pack_id or self.config.pack_manager.get_pack_json_id()
@@ -143,7 +160,7 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
         logger.info(f"[_synthesize_remote] ensure_connected returned: {connected}")
         
         if not connected:
-            logger.info("[_synthesize_remote] Error: Failed to connect to server")
+            logger.error("[_synthesize_remote] Error: Failed to connect to server")
             return TTSResult(error="Failed to connect to server")
 
         emotion_config = self._get_emotion_config(emotion, pack_id=pack_id)
@@ -256,17 +273,17 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
                                 if result.returncode == 0:
                                     output_path = pcm_path
                                 else:
-                                    logger.info(f"[TTS] FFmpeg failed: {result.stderr.decode('utf-8', errors='ignore')[-200:]}")
+                                    logger.error(f"[TTS] FFmpeg failed: {result.stderr.decode('utf-8', errors='ignore')[-200:]}")
                             return TTSResult(audio_path=output_path, duration=duration)
                         except Exception as e:
-                            logger.info(f"[TTS] Failed to read audio duration: {e}")
+                            logger.warning(f"[TTS] Failed to read audio duration: {e}")
                             return TTSResult(audio_path=output_path, duration=0.0)
                     else:
                         error_text = await response.text()
-                        logger.info(f"[TTS] API error: {response.status} - {error_text}")
+                        logger.error(f"[TTS] API error: {response.status} - {error_text}")
                         return TTSResult(error=f"API error {response.status}")
         except Exception as e:
-            logger.info(f"[TTS] Synthesis failed: {e}")
+            logger.error(f"[TTS] Synthesis failed: {e}")
             traceback.print_exc()
             return TTSResult(error=str(e))
     async def synthesize_fallback(self, text: str, emotion: str = "<E:smile>") -> TTSResult:

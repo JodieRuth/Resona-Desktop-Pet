@@ -2,6 +2,9 @@ import sys
 import os
 from pathlib import Path
 from PIL import Image
+import logging
+
+logger = logging.getLogger("Tools")
 
 TARGET_WIDTH = 1280
 TARGET_HEIGHT = 720
@@ -35,14 +38,14 @@ def process_file(file_path):
             output_path = output_dir / Path(file_path).name
             
             canvas.save(output_path, "PNG")
-            print(f"Processed: {Path(file_path).name} -> {output_path}")
+            logger.info(f"Processed: {Path(file_path).name} -> {output_path}")
 
     except Exception as e:
-        print(f"Error processing {file_path}: {e}")
+        logger.error(f"Error processing {file_path}: {e}")
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: Drag and drop folders or .png files onto this script.")
+        logger.debug("Usage: Drag and drop folders or .png files onto this script.")
         input("\nPress Enter to exit...")
         return
 
@@ -51,15 +54,15 @@ def main():
     for p in paths:
         path = Path(p)
         if path.is_dir():
-            print(f"Scanning directory: {path}")
+            logger.info(f"Scanning directory: {path}")
             for file in path.glob("*.png"):
                 process_file(str(file))
         elif path.is_file():
             process_file(str(path))
         else:
-            print(f"Invalid path: {p}")
+            logger.info(f"Invalid path: {p}")
 
-    print("\nAll tasks completed.")
+    logger.info("\nAll tasks completed.")
     input("Press Enter to exit...")
 
 if __name__ == "__main__":

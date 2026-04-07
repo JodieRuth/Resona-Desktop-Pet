@@ -11,6 +11,9 @@ from typing import Optional
 import signal
 import psutil
 from ..cleanup_manager import register_cleanup, register_pid
+import logging
+
+logger = logging.getLogger("SoVITS")
 
 _sovits_logger = None
 
@@ -22,7 +25,7 @@ def log_sovits(message):
     if _sovits_logger:
         _sovits_logger(message)
     else:
-        print(message)
+        logger.info(message)
 
 class SoVITSManager:
     def __init__(self, project_root: Path, port: int = 9880, device: str = "cuda", model_version: str = "v2"):
@@ -78,10 +81,10 @@ class SoVITSManager:
             except: pass
 
         if not self.api_script.exists():
-            print(f"[SoVITS] Error: API script not found at {self.api_script}")
+            logger.warning(f"[SoVITS] Error: API script not found at {self.api_script}")
             return False
         if not self.config_file.exists():
-            print(f"[SoVITS] Error: Config file not found at {self.config_file}")
+            logger.warning(f"[SoVITS] Error: Config file not found at {self.config_file}")
             return False
         actual_config_file = self.config_file
         if pack_id is None:
@@ -111,7 +114,7 @@ class SoVITSManager:
                                     break
                         except: pass
             if not found:
-                print(f"[SoVITS] Warning: Pack ID '{pack_id}' not found in any directory.")
+                logger.warning(f"[SoVITS] Warning: Pack ID '{pack_id}' not found in any directory.")
                 
         pack_model_dir = pack_dir / "models" / "sovits"
         log_sovits(f"[SoVITS] Starting with device={self.device}, model_version={self.model_version}")
@@ -218,28 +221,28 @@ class SoVITSManager:
                         if line: log_sovits(f"{prefix} {line.strip()}")
                 except Exception: pass
             threading.Thread(target=stream_output, args=(self.process.stdout, "[SoVITS]"), daemon=True).start()
-            threading.Thread(target=stream_output, args=(self.process.stderr, "[SoVITS Error]"), daemon=True).start()
+            threading.Thread(target=stream_output, args=(self.process.stderr, "[SoVITS]"), daemon=True).start()
             
-            print(f"[SoVITS] Process started (PID: {self.process.pid}). Waiting for API to be ready...")
+            logger.info(f"[SoVITS] Process started (PID: {self.process.pid}). Waiting for API to be ready...")
             start_time = time.time()
             SUPPRESS_DURATION = 55  # 前55秒内不打印is_running异常
             while time.time() - start_time < timeout:
                 elapsed = time.time() - self._start_time if self._start_time else float('inf')
                 suppress = elapsed < SUPPRESS_DURATION
                 if self.is_running(suppress_exception=suppress):
-                    print(f"[SoVITS] API is ready after {time.time() - start_time:.2f}s")
+                    logger.info(f"[SoVITS] API is ready after {time.time() - start_time:.2f}s")
                     return True
                 if self.process.poll() is not None:
                     exit_code = self.process.poll()
-                    print(f"[SoVITS] Error: Process exited unexpectedly with code {exit_code}")
+                    logger.error(f"[SoVITS] Error: Process exited unexpectedly with code {exit_code}")
                     return False
                 time.sleep(0.5)
             
-            print(f"[SoVITS] Error: Startup timed out after {timeout}s")
+            logger.error(f"[SoVITS] Error: Startup timed out after {timeout}s")
             self.stop()
             return False
         except Exception as e:
-            print(f"[SoVITS] Exception during startup: {e}")
+            logger.error(f"[SoVITS] Exception during startup: {e}")
             return False
     
     def _kill_process_on_port(self, port: int):
