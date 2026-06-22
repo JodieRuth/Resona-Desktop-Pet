@@ -20,20 +20,12 @@
 ## 2. 配置 AI 后端
 1. 打开根目录下的 `config.cfg`。
 2. **LLM 配置**：
-   - `model_select`: 选择模型（1-10 或 Local）。支持的模型：
-     - `1`: OpenAI (ChatGPT)
-     - `2`: DeepSeek (默认，推荐)
-     - `3`: Claude (Anthropic)
-     - `4`: Kimi (Moonshot)
-     - `5`: Gemini (Google)
-     - `6`: Grok (xAI)
-     - `7`: Qwen (通义千问)
-     - `8`: GitHub Models
-     - `9`: OpenAI Compatible (任何兼容 OpenAI API 格式的模型)
-     - `10`: Zhipu (智谱 AI)
-     - `Local`: 本地模型 (Ollama 等)
+   - `model_select`: 选择要使用的 `[Model_N]` 配置块编号。
+   - `[Model_1]`: 默认模型配置块。需要多个配置时，复制整个块并改名为 `[Model_2_任意名称]`、`[Model_3_任意名称]` 等。
+   - `provider`: LiteLLM 的模型前缀，例如 `openai`、`deepseek`、`anthropic`、`gemini`。程序会把 `provider = deepseek` 与 `model_name = deepseek-chat` 自动组合成 `deepseek/deepseek-chat`。
    - `api_key`: 填入您的 API Key。
    - `base_url`: 如果使用第三方服务或本地转发，请填写对应的 API 地址。
+   - `model_name`: 填入模型名；如果已经包含 `/`，程序不会再次添加 `provider` 前缀。
 3. **SoVITS 配置**：
    - 确保已按照 README 的说明获取 SoVITS 整合包并解压到指定路径。
    - 设置 `enabled = true`（在 `[SoVITS]` 节中）。

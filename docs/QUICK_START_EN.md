@@ -20,20 +20,12 @@ Follow these steps to get your ResonaDesktopPet up and running in minutes.
 ## 2. Configure AI Backend
 1. Open `config.cfg` in the root directory.
 2. **LLM Config**:
-   - `model_select`: Select model (1-10 or Local). Supported models:
-     - `1`: OpenAI (GPT-4/GPT-3.5)
-     - `2`: DeepSeek (default, recommended)
-     - `3`: Claude (Anthropic)
-     - `4`: Kimi (Moonshot)
-     - `5`: Gemini (Google)
-     - `6`: Grok (xAI)
-     - `7`: Qwen (Alibaba)
-     - `8`: GitHub Models
-     - `9`: OpenAI Compatible (any OpenAI API-compatible model)
-     - `10`: Zhipu (智谱 AI)
-     - `Local`: Local models (Ollama, etc.)
+   - `model_select`: Selects the `[Model_N]` configuration block to use.
+   - `[Model_1]`: Default model configuration block. To add more configurations, copy the whole block and rename it to `[Model_2_AnyName]`, `[Model_3_AnyName]`, etc.
+   - `provider`: LiteLLM model prefix, such as `openai`, `deepseek`, `anthropic`, or `gemini`. The app combines `provider = deepseek` and `model_name = deepseek-chat` into `deepseek/deepseek-chat`.
    - `api_key`: Enter your API Key.
    - `base_url`: Enter the API endpoint if using third-party services or proxies.
+   - `model_name`: Enter the model name. If it already contains `/`, the app will not add the `provider` prefix again.
 3. **OCR Config (Optional)**:
    - `enabled`: Set to `true` to enable screen recognition context.
    - **Multimodal Models**: Set `vlm_enabled = true` to use multimodal models (like GPT-4V) for direct screen screenshot recognition. OCR will be automatically disabled when VLM is enabled.

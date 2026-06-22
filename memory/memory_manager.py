@@ -1,4 +1,3 @@
-import os
 import json
 import sqlite3
 import uuid
@@ -299,35 +298,6 @@ class MemoryManager:
                 })
 
         return results
-    
-    def get_conversations(self, pack_id: str, session_id: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
-        db_path = self.get_db_path(pack_id, "conversation")
-        with self._get_connection(db_path) as conn:
-            cursor = conn.cursor()
-            
-            if session_id:
-                cursor.execute(
-                    "SELECT uuid, session_id, timestamp, user_message, llm_response FROM conversations WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?",
-                    (session_id, limit)
-                )
-            else:
-                cursor.execute(
-                    "SELECT uuid, session_id, timestamp, user_message, llm_response FROM conversations ORDER BY timestamp DESC LIMIT ?",
-                    (limit,)
-                )
-            
-            results = cursor.fetchall()
-        
-        return [
-            {
-                "uuid": row[0],
-                "session_id": row[1],
-                "timestamp": row[2],
-                "user_message": row[3],
-                "llm_response": row[4]
-            }
-            for row in results
-        ]
     
     def save_temp_session(self, user_message: str, llm_response: str):
         session_entry = {

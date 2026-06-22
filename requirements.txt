@@ -2,11 +2,8 @@
 PySide6==6.10.1
 requests>=2.31.0
 psutil>=5.9.0
-python-dotenv>=1.0.0
 aiohttp>=3.9.0
-tqdm>=4.66.0
 pillow>=10.0.0
-openai>=2.8.0
 litellm>=1.83.13
 sherpa-onnx>=1.10.0
 pyaudio>=0.2.14
@@ -20,7 +17,6 @@ pyperclip>=1.8.2
 fastapi>=0.100.0
 uvicorn>=0.20.0
 python-multipart>=0.0.9
-qasync>=0.27.0
 soundfile>=0.12.1
 PyYAML>=6.0.1
 tencentcloud-sdk-python-common>=3.0.0
@@ -31,6 +27,5 @@ websockets==15.0.1
 onnxruntime>=1.16.0
 transformers>=4.35.0
 
-python-xlib; sys_platform == 'linux'
 ewmh; sys_platform == 'linux'
 mss; sys_platform == 'linux'

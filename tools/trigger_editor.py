@@ -6,7 +6,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QListWidget, QPushButton, QLabel, QGroupBox, QLineEdit, 
                              QDoubleSpinBox, QSpinBox, QCheckBox, QComboBox, QTreeWidget,
-                             QTreeWidgetItem, QFormLayout, QMessageBox, QTextEdit, QStatusBar)
+                             QTreeWidgetItem, QFormLayout, QStatusBar)
 from PySide6.QtCore import Qt
 import logging
 

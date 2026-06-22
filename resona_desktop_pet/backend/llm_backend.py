@@ -21,13 +21,14 @@ if sys.platform == "win32":
     from PIL import ImageGrab
 else:
     try:
-        import mss
+        import importlib.util
+        if importlib.util.find_spec("mss") is None:
+            raise ImportError
         _MSS_AVAILABLE = True
     except ImportError:
         _MSS_AVAILABLE = False
     try:
         from ewmh import EWMH
-        from Xlib import display
         _XLIB_AVAILABLE = True
     except ImportError:
         _XLIB_AVAILABLE = False
@@ -142,16 +143,18 @@ class LLMBackend:
 
     def reconnect(self):
         llm_cfg = self.config.get_llm_config()
-        model_type = llm_cfg["model_type"]
+        section = llm_cfg.get("section", "")
+        provider = llm_cfg.get("provider", "")
         model_name = llm_cfg["model_name"]
         api_key = llm_cfg["api_key"]
         base_url = llm_cfg.get("base_url", "")
         
-        new_signature = (model_type, model_name, api_key, base_url)
+        new_signature = (section, provider, model_name, api_key, base_url)
         if new_signature == self._active_model_signature:
             return
 
-        logger_info.info(f"[LLM] Initializing LLM session for: {model_name}")
+        resolved_model = self._normalize_model_name(provider, model_name)
+        logger_info.info(f"[LLM] Initializing LLM session for: {resolved_model}")
         self._active_model_name = model_name
         self._active_model_signature = new_signature
         logger_info.info(f"[LLM] Client metadata initialized.")
@@ -181,41 +184,6 @@ class LLMBackend:
             "When calling a tool, do not return the final JSON in that turn. "
             "Only return the final JSON once the task is complete or you require user input."
         )
-
-    def _get_subagent_system_prompt(self) -> str:
-        return (
-            "You are a sub-agent. Execute the requested task using tools. "
-            "Use tools until the task is complete, then return a concise report."
-        )
-
-    def _prune_subagent_history(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if len(messages) <= 3:
-            return messages
-            
-        new_messages = [messages[0]]
-        
-        first_user_msg = messages[1].copy()
-        content = first_user_msg["content"]
-        for block in ["[INITIAL_STATE]", "[YOUR PREVIOUS THOUGHTS]", "[RECENT THOUGHTS]", "[MANDATORY INSTRUCTION]"]:
-            if block in content:
-                content = content.split(block)[0].strip()
-        first_user_msg["content"] = content + "\n\n(Initial state omitted. See latest tool result for current battlefield.)"
-        new_messages.append(first_user_msg)
-        
-
-        last_assistant_idx = -1
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i].get("role") == "assistant":
-                last_assistant_idx = i
-                break
-        
-        if last_assistant_idx != -1 and last_assistant_idx > 1:
-            new_messages.extend(messages[last_assistant_idx:])
-        elif len(messages) > 2:
-            new_messages.append(messages[-1])
-        
-        logger.info(f"[SubAgent] Aggressive pruning: {len(messages)} -> {len(new_messages)} messages.")
-        return new_messages
 
     async def _run_subagent(
         self,
@@ -395,31 +363,12 @@ class LLMBackend:
             return ""
         return content if isinstance(content, str) else str(content)
 
-    def _normalize_model_name(self, model_type: Any, model_name: str) -> str:
-        if not model_name:
+    def _normalize_model_name(self, provider: Any, model_name: str) -> str:
+        model_name = (model_name or "").strip()
+        provider = str(provider or "").strip().strip("/")
+        if not model_name or "/" in model_name or not provider:
             return model_name
-        if "/" in model_name:
-            return model_name
-        provider = None
-        if model_type == "local":
-            provider = "openai"
-        elif model_type == 1:
-            provider = "openai"
-        elif model_type == 2:
-            provider = "deepseek"
-        elif model_type == 3:
-            provider = "anthropic"
-        elif model_type == 4:
-            provider = "moonshot"
-        elif model_type == 5:
-            provider = "gemini"
-        elif model_type == 6:
-            provider = "xai"
-        elif model_type in [7, 8, 9, 10]:
-            provider = "openai"
-        if provider:
-            return f"{provider}/{model_name}"
-        return model_name
+        return f"{provider}/{model_name}"
 
     def _extract_litellm_message(self, response: Any) -> tuple[str, str]:
         if isinstance(response, dict):
@@ -478,7 +427,6 @@ class LLMBackend:
                 ewmh = EWMH()
                 active = ewmh.getActiveWindow()
                 if active:
-                    pid = ewmh.getWmPid(active)
                     name = ewmh.getWmName(active)
                     if isinstance(name, bytes):
                         name = name.decode('utf-8', errors='ignore')
@@ -792,7 +740,7 @@ class LLMBackend:
         self,
         messages: list,
         model_name: str,
-        model_type: Any,
+        provider: str,
         api_key: str,
         base_url: str,
         tools: Optional[List[Dict[str, Any]]] = None,
@@ -801,7 +749,7 @@ class LLMBackend:
         top_p: float = 1.0,
         max_tokens: int = 500
     ) -> Tuple[Any, str, str, List[Any]]:
-        resolved_model = self._normalize_model_name(model_type, model_name)
+        resolved_model = self._normalize_model_name(provider, model_name)
         if "gemini-3" in resolved_model.lower() and temperature < 1.0:
             logger_info.info(f"[LLM] Overriding temperature for {resolved_model}: {temperature} -> 1.0 (Required for Gemini 3)")
             temperature = 1.0
@@ -854,19 +802,38 @@ class LLMBackend:
         self,
         messages: list,
         model_name: str,
-        model_type: Any,
+        provider: str,
         api_key: str,
         base_url: str,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        max_tokens: int = 500
+        max_tokens: int = 500,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        max_tool_rounds: int = 0,
+        pack_id: Optional[str] = None,
+        original_question: str = ""
     ) -> LLMResponse:
         try:
+            if tools:
+                return await self._query_with_tools(
+                    messages,
+                    model_name,
+                    provider,
+                    api_key,
+                    base_url,
+                    tools=tools,
+                    max_tool_rounds=max_tool_rounds,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    pack_id=pack_id,
+                    original_question=original_question
+                )
             self._notify_activity()
             _, raw_text, reasoning, _ = await self._call_litellm_raw(
                 messages,
                 model_name,
-                model_type,
+                provider,
                 api_key,
                 base_url,
                 tools=None,
@@ -938,7 +905,7 @@ class LLMBackend:
         _, raw_text, reasoning, tool_calls = await self._call_litellm_raw(
             messages,
             llm_cfg["model_name"],
-            llm_cfg["model_type"],
+            llm_cfg.get("provider", ""),
             llm_cfg["api_key"],
             llm_cfg.get("base_url", ""),
             tools=tools,
@@ -999,7 +966,7 @@ class LLMBackend:
         self,
         messages: list,
         model_name: str,
-        model_type: Any,
+        provider: str,
         api_key: str,
         base_url: str,
         tools: List[Dict[str, Any]],
@@ -1034,7 +1001,7 @@ class LLMBackend:
             _, raw_text, reasoning, tool_calls = await self._call_litellm_raw(
                 messages,
                 model_name,
-                model_type,
+                provider,
                 api_key,
                 base_url,
                 tools=tools,
@@ -1126,12 +1093,13 @@ class LLMBackend:
 
     async def query(self, question: str, history: Optional[ConversationHistory] = None, extra_context: Optional[str] = None, pack_id: Optional[str] = None, source: str = "desktop") -> LLMResponse:
         llm_config = self.config.get_llm_config()
-        model_type = llm_config["model_type"]
+        section = llm_config.get("section", "")
+        provider = llm_config.get("provider", "")
         model_name = llm_config["model_name"]
         api_key = llm_config["api_key"]
         base_url = llm_config.get("base_url", "")
         
-        current_signature = (model_type, model_name, api_key, base_url)
+        current_signature = (section, provider, model_name, api_key, base_url)
         if current_signature != self._active_model_signature:
             self.reconnect()
 
@@ -1154,9 +1122,7 @@ class LLMBackend:
                     except Exception:
                         image_base64 = None
 
-            openai_compatible = model_type == "local" or model_type in [1, 2, 4, 6, 7, 8, 9, 10]
-            image_capable = openai_compatible or model_type in [3, 5]
-            if image_base64 and image_capable:
+            if image_base64:
                 messages = self._build_messages_with_image(question, extra_context or ocr_context, image_base64, history, pack_id=pack_id, source=source)
             else:
                 messages = self._build_messages(question, extra_context or ocr_context, history, pack_id=pack_id, source=source)
@@ -1178,43 +1144,39 @@ class LLMBackend:
                     prompt_parts.append("process")
                 if "OCR Result" not in ocr_context and "Foreground Monitor Processes" not in ocr_context:
                     prompt_parts.append("extra_context")
-            if image_base64 and image_capable:
+            if image_base64:
                 prompt_parts.append("image")
             
             target_history = history if history is not None else self.history
             if target_history.get_messages():
                 prompt_parts.append("history")
 
-            supported_types = {"local", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-            if model_type in supported_types:
-                if tools:
-                    response = await self._query_with_tools(
-                        messages,
-                        model_name,
-                        model_type,
-                        api_key,
-                        base_url,
-                        tools=tools,
-                        max_tool_rounds=max_tool_rounds,
-                        temperature=llm_config.get("temperature", 0.7),
-                        top_p=llm_config.get("top_p", 1.0),
-                        max_tokens=llm_config.get("max_tokens", 500),
-                        pack_id=pack_id,
-                        original_question=question
-                    )
-                else:
-                    response = await self._query_litellm(
-                        messages,
-                        model_name,
-                        model_type,
-                        api_key,
-                        base_url,
-                        temperature=llm_config.get("temperature", 0.7),
-                        top_p=llm_config.get("top_p", 1.0),
-                        max_tokens=llm_config.get("max_tokens", 500)
-                    )
+            if tools:
+                response = await self._query_with_tools(
+                    messages,
+                    model_name,
+                    provider,
+                    api_key,
+                    base_url,
+                    tools=tools,
+                    max_tool_rounds=max_tool_rounds,
+                    temperature=llm_config.get("temperature", 0.7),
+                    top_p=llm_config.get("top_p", 1.0),
+                    max_tokens=llm_config.get("max_tokens", 500),
+                    pack_id=pack_id,
+                    original_question=question
+                )
             else:
-                response = LLMResponse(error=f"Unsupported model type: {model_type}")
+                response = await self._query_litellm(
+                    messages,
+                    model_name,
+                    provider,
+                    api_key,
+                    base_url,
+                    temperature=llm_config.get("temperature", 0.7),
+                    top_p=llm_config.get("top_p", 1.0),
+                    max_tokens=llm_config.get("max_tokens", 500)
+                )
         except Exception as e:
             response = LLMResponse(error=f"Request Failed: {e}")
 
@@ -1239,12 +1201,13 @@ class LLMBackend:
 
     async def query_idle(self, question: str, pack_id: Optional[str] = None) -> LLMResponse:
         llm_config = self.config.get_llm_config()
-        model_type = llm_config["model_type"]
+        section = llm_config.get("section", "")
+        provider = llm_config.get("provider", "")
         model_name = llm_config["model_name"]
         api_key = llm_config["api_key"]
         base_url = llm_config.get("base_url", "")
         
-        current_signature = (model_type, model_name, api_key, base_url)
+        current_signature = (section, provider, model_name, api_key, base_url)
         if current_signature != self._active_model_signature:
             self.reconnect()
 
@@ -1257,7 +1220,6 @@ class LLMBackend:
             extra_context = "\n".join(extra_context_parts) if extra_context_parts else None
 
             messages = self._build_messages(question, extra_context=extra_context, history=None, pack_id=pack_id, source="idle_trigger")
-            processed_question = self._extract_text_content(messages[-1]["content"])
 
             tools: List[Dict[str, Any]] = []
             max_tool_rounds = 0
@@ -1265,22 +1227,20 @@ class LLMBackend:
                 tools = self._mcp_manager.get_memory_tools_only(pack_id)
                 max_tool_rounds = 8  
 
-            supported_types = {"local", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-            if model_type in supported_types:
-                response = await self._query_litellm(
-                    messages,
-                    model_name,
-                    model_type,
-                    api_key,
-                    base_url,
-                    temperature=llm_config.get("temperature", 0.7),
-                    top_p=llm_config.get("top_p", 1.0),
-                    max_tokens=llm_config.get("max_tokens", 500),
-                    tools=tools if tools else None,
-                    max_tool_rounds=max_tool_rounds
-                )
-            else:
-                response = LLMResponse(error=f"Unsupported model type: {model_type}")
+            response = await self._query_litellm(
+                messages,
+                model_name,
+                provider,
+                api_key,
+                base_url,
+                temperature=llm_config.get("temperature", 0.7),
+                top_p=llm_config.get("top_p", 1.0),
+                max_tokens=llm_config.get("max_tokens", 500),
+                tools=tools if tools else None,
+                max_tool_rounds=max_tool_rounds,
+                pack_id=pack_id,
+                original_question=question
+            )
         except Exception as e:
             response = LLMResponse(error=f"Request Failed: {e}")
 

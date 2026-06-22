@@ -1,10 +1,9 @@
 import json
 import random
-import re
 from pathlib import Path
 from typing import Dict, List, Optional
-from PySide6.QtCore import Qt, QSize, QRect, Signal, QPoint
-from PySide6.QtGui import QPainter, QPaintEvent, QMouseEvent, QPixmap, QColor
+from PySide6.QtCore import Qt, QSize, QRect, Signal
+from PySide6.QtGui import QPainter, QPaintEvent, QMouseEvent, QPixmap
 from PySide6.QtWidgets import QWidget
 import logging
 
@@ -203,7 +202,6 @@ class CharacterView(QWidget):
                     if url.isLocalFile():
                         file_path = url.toLocalFile()
                         if os.path.isfile(file_path):
-                            import os
                             from pathlib import Path
                             path = Path(file_path)
                             file_info = {

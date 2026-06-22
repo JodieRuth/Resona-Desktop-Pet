@@ -167,9 +167,6 @@ class PhysicsBridge(QObject):
 
         pet_w = sprite_rect.width()
         pet_h = sprite_rect.height()
-        window_geo = self.target.frameGeometry()
-        window_w = window_geo.width()
-        window_h = window_geo.height()
         dialog_rect = None
         if hasattr(self.target, "io"):
             dialog_rect = self.target.io.geometry()

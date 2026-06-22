@@ -1,4 +1,3 @@
-import os
 import glob
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP

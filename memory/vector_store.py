@@ -1,61 +1,35 @@
 import numpy as np
 from pathlib import Path
-from typing import List, Optional, Tuple
-import json
+from typing import List, Tuple
 import logging
 
 logger = logging.getLogger("Memory")
 
 
 class VectorStore:
-    REQUIRED_FILES = [
-        "config.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-        "sentencepiece.bpe.model",
-        "special_tokens_map.json",
-    ]
-
     def __init__(self, model_path: Path, model_file: str = "model.onnx"):
         self.model_path = model_path
         self.model_file = model_file
         self.model = None
+        self.session = None
         self.tokenizer = None
         self._load_model()
 
     def _load_model(self):
         try:
-            try:
-                from optimum.onnxruntime import ORTModelForFeatureExtraction
-                from transformers import AutoTokenizer
+            import onnxruntime as ort
+            from transformers import AutoTokenizer
 
-                model_file_path = self.model_path / self.model_file
+            model_file_path = self.model_path / self.model_file
 
-                if not model_file_path.exists():
-                    return
+            if not model_file_path.exists():
+                return
 
-                self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
-                self.model = ORTModelForFeatureExtraction.from_pretrained(
-                    str(self.model_path),
-                    file_name=self.model_file
-                )
-                logger.info(f"[VectorStore] Loaded ONNX model via optimum: {self.model_file}")
+            self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
+            self.session = ort.InferenceSession(str(model_file_path))
+            self.model = self.session
 
-            except ImportError:
-                import onnxruntime as ort
-                from transformers import AutoTokenizer
-
-                model_file_path = self.model_path / self.model_file
-
-                if not model_file_path.exists():
-                    return
-
-                self.tokenizer = AutoTokenizer.from_pretrained(str(self.model_path))
-
-                self.session = ort.InferenceSession(str(model_file_path))
-                self.model = self  
-
-                logger.info(f"[VectorStore] Loaded ONNX model via onnxruntime: {self.model_file}")
+            logger.info(f"[VectorStore] Loaded ONNX model via onnxruntime: {self.model_file}")
 
         except Exception as e:
             logger.info(f"[VectorStore] Failed to load model: {e}")
@@ -75,25 +49,18 @@ class VectorStore:
             return_tensors="np"
         )
 
-        if hasattr(self, 'session'):
-            input_names = [inp.name for inp in self.session.get_inputs()]
-            input_feed = {}
+        input_names = [inp.name for inp in self.session.get_inputs()]
+        input_feed = {}
 
-            for name in input_names:
-                if name in inputs:
-                    tensor = inputs[name]
-                    if tensor.dtype == np.int32:
-                        tensor = tensor.astype(np.int64)
-                    input_feed[name] = tensor
+        for name in input_names:
+            if name in inputs:
+                tensor = inputs[name]
+                if tensor.dtype == np.int32:
+                    tensor = tensor.astype(np.int64)
+                input_feed[name] = tensor
 
-            outputs = self.session.run(None, input_feed)
-            embeddings = outputs[0].mean(axis=1)  
-        else:
-            import torch
-            inputs_pt = {k: torch.from_numpy(v) for k, v in inputs.items()}
-            outputs = self.model(**inputs_pt)
-            embeddings = outputs.last_hidden_state.mean(dim=1)
-            embeddings = embeddings.detach().numpy()
+        outputs = self.session.run(None, input_feed)
+        embeddings = outputs[0].mean(axis=1)
 
         return [embeddings[i] for i in range(len(texts))]
 

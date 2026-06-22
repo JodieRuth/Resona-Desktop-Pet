@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, QRect, Signal, QEvent, QObject, QTimer
-from PySide6.QtGui import QPainter, QColor, QFont, QKeyEvent, QResizeEvent, QPaintEvent, QFontDatabase, QPixmap
+from PySide6.QtGui import QPainter, QColor, QFont, QResizeEvent, QPaintEvent, QFontDatabase, QPixmap
 from PySide6.QtWidgets import QWidget, QTextEdit, QLabel, QFrame, QGraphicsDropShadowEffect
 from typing import Optional
 import os
@@ -197,9 +197,6 @@ class IOOverlay(QWidget):
         font_scale = 1.0
         config = None
         text_color = "white"
-        stroke_enabled = False
-        stroke_color = "black"
-        stroke_width = 0
         shadow_enabled = False
         shadow_color = "black"
         shadow_offset_x = 0
@@ -216,16 +213,6 @@ class IOOverlay(QWidget):
                     text_color = tc.name()
                 elif tc_str.startswith("#"):
                     text_color = tc_str
-
-                stroke_enabled = config.dialog_text_stroke_enabled
-                if stroke_enabled:
-                    sc_str = config.dialog_text_stroke_color
-                    if "," in sc_str:
-                        sc = self._parse_color(sc_str, 100)
-                        stroke_color = sc.name()
-                    elif sc_str.startswith("#"):
-                        stroke_color = sc_str
-                    stroke_width = config.dialog_text_stroke_width
 
                 shadow_enabled = config.dialog_text_shadow_enabled
                 if shadow_enabled:

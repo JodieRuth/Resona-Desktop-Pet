@@ -6,10 +6,7 @@
 负责与各种大模型 API 通讯。
 - **统一调用**：基于 `litellm` 库实现统一的大模型 API 调用，支持 100+ 种模型。
 - **对话历史管理**：内置 `ConversationHistory` 类，自动维护最近 N 轮对话。
-- **多模型适配**：
-  - `query_openai_compatible`: 支持 DeepSeek, GPT-4, LocalLLM 等。
-  - `query_gemini`: 针对 Google Gemini 的历史格式进行了特殊适配。
-  - `query_claude`: 支持 Anthropic Claude。
+- **多模型适配**：通过 `[Model_N]` 配置块中的 `provider` 字段决定 LiteLLM 模型前缀，支持复制多个模型配置块进行切换。
 - **思考过程支持**：能够提取并记录 R1/Claude 等模型的 `<think>` 标签内容。
 - **自动解析**：自动将模型返回的 JSON 字符串解析为 `LLMResponse` 对象（包含表情、显示文本、语音文本）。
 - **OCR 上下文（可选）**：可按配置对屏幕进行文字识别并注入提示词，增强环境感知；启用后会将屏幕内容发送到第三方 OCR 服务，可能包含敏感信息，使用者需自行承担由此带来的全部后果。

@@ -1,12 +1,11 @@
 from fastapi import FastAPI, WebSocket, Request, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import asyncio
 import threading
 import json
-import os
 import shutil
 import time
 import websockets
@@ -54,8 +53,6 @@ def resolve_static_path(controller, static_dir: str) -> Path:
         if (candidate / "index.html").exists():
             return candidate
     return candidate_paths[0]
-
-import random
 
 def resolve_idle_image(controller, pack_id: str, outfit_id: str) -> Optional[str]:
     if not controller: return None
@@ -151,21 +148,6 @@ def get_initial_pack_state(controller, pack_id: Optional[str] = None, outfit_id:
         "available_packs": all_packs
     }
 
-def get_listening_state(controller):
-    if not controller: return {}
-    
-    listening_texts = getattr(controller.config, "listening_texts", [])
-    listen_text_entry = random.choice(listening_texts) if listening_texts else "Listening..."
-    if isinstance(listen_text_entry, dict):
-        listen_text = listen_text_entry.get("text", "Listening...")
-    else:
-        listen_text = str(listen_text_entry)
-    
-    
-    return {
-        "text": listen_text
-    }
-
 def set_controller(controller, loop):
     global controller_ref, main_loop
     controller_ref = controller
@@ -189,7 +171,6 @@ def start_udp_beacon(http_port: int):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    client_id = str(websocket.client.host)
     
     try:
         init_data = await websocket.receive_json()
@@ -306,7 +287,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             main_loop
                         )
 
-    except Exception as e:
+    except Exception:
         pass
     finally:
         if session:

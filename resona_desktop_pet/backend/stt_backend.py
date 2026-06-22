@@ -1,7 +1,6 @@
 import asyncio
 import os
 import threading
-import wave
 import logging
 from pathlib import Path
 from typing import Optional, Callable

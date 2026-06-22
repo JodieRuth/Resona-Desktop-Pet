@@ -1,9 +1,7 @@
-import asyncio
-import json
 import time
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List
 
 from resona_desktop_pet.config.config_manager import ConfigManager
 from resona_desktop_pet.backend.llm_backend import LLMBackend
@@ -40,14 +38,19 @@ class StartupProcessor:
                 source="startup"
             )
 
+            if response.error:
+                logger.error(f"[Memory] Startup processing failed: {response.error}")
+                return
+
             if response.text_display:
                 logger.info(f"[Memory] Processing result: {response.text_display[:200]}...")
 
-        except Exception as e:
-            logger.error(f"[Memory] Error during startup processing: {e}")
-        finally:
             self.memory_manager.delete_temp_session()
             logger.info("[Memory] Startup processing finished")
+
+        except Exception as e:
+            logger.error(f"[Memory] Error during startup processing: {e}")
+            logger.info("[Memory] Startup processing failed; temporary session preserved for retry")
     
     def _create_startup_llm_backend(self) -> LLMBackend:
         startup_base_url = self.config.memory_startup_base_url

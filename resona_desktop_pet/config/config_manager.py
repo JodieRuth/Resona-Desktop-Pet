@@ -1,5 +1,6 @@
 import configparser
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -40,12 +41,26 @@ class ConfigManager:
 
         new_lines = []
         current_section = None
-        processed_items = set() 
+        processed_items = set()
+        seen_sections = set()
+
+        def append_unprocessed_items(section: Optional[str]) -> None:
+            if not section or not self.config.has_section(section):
+                return
+            for mem_key in self.config.options(section):
+                item_key = (section.lower(), mem_key.lower())
+                if item_key in processed_items:
+                    continue
+                val = self.config.get(section, mem_key)
+                new_lines.append(f"{mem_key} = {val}\n")
+                processed_items.add(item_key)
 
         for line in lines:
             stripped = line.strip()
             if stripped.startswith("[") and stripped.endswith("]"):
+                append_unprocessed_items(current_section)
                 current_section = stripped[1:-1]
+                seen_sections.add(current_section.lower())
                 new_lines.append(line)
                 continue
             
@@ -66,6 +81,17 @@ class ConfigManager:
                     new_lines.append(line)
             else:
                 new_lines.append(line)
+
+        append_unprocessed_items(current_section)
+
+        for section in self.config.sections():
+            if section.lower() in seen_sections:
+                continue
+            if new_lines and new_lines[-1].strip():
+                new_lines.append("\n")
+            new_lines.append(f"[{section}]\n")
+            for key, val in self.config.items(section):
+                new_lines.append(f"{key} = {val}\n")
 
         with open(self.config_path, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
@@ -151,7 +177,7 @@ class ConfigManager:
 
     @property
     def model_select(self) -> int:
-        return self.getint("General", "model_select", 2)
+        return self.getint("General", "model_select", 1)
 
     @property
     def llm_mode(self) -> str:
@@ -861,18 +887,6 @@ class ConfigManager:
         return self.getint("HTML", "session_timeout", 3600)
 
     @property
-    def monitor_clipboard(self) -> bool:
-        return self.get_bool("General", "monitor_clipboard", True)
-
-    @property
-    def monitor_music(self) -> bool:
-        return self.get_bool("General", "monitor_music", True)
-
-    @property
-    def use_ui_automation(self) -> bool:
-        return self.get_bool("Advanced", "use_ui_automation", True)
-
-    @property
     def special_dates_mode(self) -> str:
         return self.get("Advanced", "special_dates_mode", "once")
 
@@ -1016,31 +1030,40 @@ class ConfigManager:
 
         raise RuntimeError(f"CRITICAL: Required prompt file '{filename}' not found in active pack and no default available.")
 
+    def _parse_llm_section_id(self, section: str) -> Optional[int]:
+        match = re.fullmatch(r"Model_(\d+)(?:_.*)?", section)
+        if not match:
+            return None
+        return int(match.group(1))
+
+    def get_llm_sections(self) -> list[dict]:
+        sections = []
+        for section in self.config.sections():
+            model_id = self._parse_llm_section_id(section)
+            if model_id is None:
+                continue
+            sections.append({"id": model_id, "section": section})
+        sections.sort(key=lambda item: (item["id"], item["section"].lower()))
+        return sections
+
+    def get_llm_section(self, model_id: Optional[int] = None) -> str:
+        target_id = self.model_select if model_id is None else model_id
+        sections = self.get_llm_sections()
+        for item in sections:
+            if item["id"] == target_id:
+                return item["section"]
+        if sections:
+            return sections[0]["section"]
+        raise RuntimeError("CRITICAL CONFIG ERROR: No [Model_N] LLM configuration section found in config.cfg.")
+
     def get_llm_config(self) -> dict:
-        mode = self.get("General", "llm_mode", "cloud").lower()
-        
+        target_section = self.get_llm_section()
+        model_id = self._parse_llm_section_id(target_section)
 
-        if mode == "local":
-            return {
-                "model_type": "local",
-                "api_key": self.get_required("Model_Local", "api_key"),
-                "base_url": self.get_required("Model_Local", "base_url"),
-                "model_name": self.get("Model_Local", "model_name", "qwen2.5:7b"),
-                "temperature": self.getfloat("Model_Local", "temperature", 0.95),
-                "top_p": self.getfloat("Model_Local", "top_p", 1.0),
-                "max_tokens": self.getint("Model_Local", "max_tokens", 768)
-            }
-            
-
-        model_id = self.model_select
-        target_section = f"Model_{model_id}"
-        for s in self.config.sections():
-            if s.startswith(f"Model_{model_id}"):
-                target_section = s
-                break
-                
         return {
-            "model_type": model_id,
+            "model_type": model_id if model_id is not None else target_section,
+            "section": target_section,
+            "provider": self.get(target_section, "provider", "openai").strip(),
             "api_key": self.get_required(target_section, "api_key"),
             "base_url": self.get(target_section, "base_url", ""),
             "model_name": self.get(target_section, "model_name", ""),

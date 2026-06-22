@@ -4,8 +4,8 @@ import importlib.util
 import configparser
 from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QFormLayout, 
-                             QSlider, QSpinBox, QDoubleSpinBox, QLineEdit, QLabel, QGroupBox, QCheckBox)
-from PySide6.QtCore import Qt, QTimer
+                             QSpinBox, QDoubleSpinBox, QLineEdit, QLabel, QGroupBox, QCheckBox)
+from PySide6.QtCore import QTimer
 import logging
 
 logger = logging.getLogger("Tools")

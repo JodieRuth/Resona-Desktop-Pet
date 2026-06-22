@@ -1,7 +1,6 @@
 import asyncio
 import json
 import base64
-import os
 import sys
 import socket
 import threading
@@ -70,12 +69,14 @@ class RemoteTTSHandler:
                             self._discovered_server = {
                                 "host": message.get("host"),
                                 "port": message.get("port"),
-                                "packs": message.get("packs", [])
+                                "packs": message.get("packs", []),
                             }
-                            logger.info(f"Discovered server: {self._discovered_server['host']}:{self._discovered_server['port']}")
+                            logger.info(
+                                f"Discovered server: {self._discovered_server['host']}:{self._discovered_server['port']}"
+                            )
                     except socket.timeout:
                         continue
-                    except Exception as e:
+                    except Exception:
                         if self._discovery_running:
                             pass
                 try:
@@ -99,7 +100,9 @@ class RemoteTTSHandler:
             except:
                 pass
 
-    async def discover_server(self, timeout: float = DISCOVERY_TIMEOUT) -> Optional[Dict]:
+    async def discover_server(
+        self, timeout: float = DISCOVERY_TIMEOUT
+    ) -> Optional[Dict]:
         if not self._discovery_running:
             if not self._start_discovery_listener():
                 return None
@@ -112,7 +115,9 @@ class RemoteTTSHandler:
 
         return None
 
-    async def connect_with_discovery(self, pack_id: str, prefer_discovery: bool = True) -> bool:
+    async def connect_with_discovery(
+        self, pack_id: str, prefer_discovery: bool = True
+    ) -> bool:
         if prefer_discovery and self.auto_discover:
             logger.info("Attempting to discover server via UDP broadcast...")
             discovered = await self.discover_server(timeout=DISCOVERY_TIMEOUT)
@@ -120,7 +125,9 @@ class RemoteTTSHandler:
                 self.server_host = discovered["host"]
                 self.server_port = discovered["port"]
                 self.ws_url = f"ws://{self.server_host}:{self.server_port}"
-                logger.info(f"Using discovered server: {self.server_host}:{self.server_port}")
+                logger.info(
+                    f"Using discovered server: {self.server_host}:{self.server_port}"
+                )
             else:
                 logger.info("Discovery timeout, using configured server address")
 
@@ -132,13 +139,12 @@ class RemoteTTSHandler:
             return False
 
         try:
-            self._ws = await websockets.connect(self.ws_url, ping_interval=30, ping_timeout=10)
+            self._ws = await websockets.connect(
+                self.ws_url, ping_interval=30, ping_timeout=10
+            )
             logger.info(f"Connected to server: {self.ws_url}")
 
-            await self._ws.send(json.dumps({
-                "type": "handshake",
-                "pack_id": pack_id
-            }))
+            await self._ws.send(json.dumps({"type": "handshake", "pack_id": pack_id}))
 
             logger.info("Waiting for handshake_ack...")
             response = await asyncio.wait_for(self._ws.recv(), timeout=10)
@@ -149,8 +155,10 @@ class RemoteTTSHandler:
                 self._connected = True
                 self._available_packs = data.get("available_packs", [])
                 self._pack_valid = data.get("requested_pack_valid", False)
-                logger.info(f"Handshake complete. Pack valid: {self._pack_valid}, Available: {self._available_packs}")
-                
+                logger.info(
+                    f"Handshake complete. Pack valid: {self._pack_valid}, Available: {self._available_packs}"
+                )
+
                 self._stop_discovery_listener()
 
                 self._receive_task = asyncio.create_task(self._receive_loop())
@@ -166,6 +174,7 @@ class RemoteTTSHandler:
         except Exception as e:
             logger.error(f"Connection failed: {e}")
             import traceback
+
             logger.error(f"Connection error traceback: {traceback.format_exc()}")
             self._connected = False
             return False
@@ -196,8 +205,10 @@ class RemoteTTSHandler:
             self._connected = False
 
     async def ensure_connected(self, pack_id: str) -> bool:
-        logger.info(f"[ensure_connected] _connected={self._connected}, _ws={self._ws is not None}")
-        
+        logger.info(
+            f"[ensure_connected] _connected={self._connected}, _ws={self._ws is not None}"
+        )
+
         if self._connected and self._ws:
             try:
                 await asyncio.wait_for(self._ws.ping(), timeout=2)
@@ -206,7 +217,7 @@ class RemoteTTSHandler:
             except Exception as e:
                 logger.warning(f"[ensure_connected] Connection test failed: {e}")
                 self._connected = False
-        
+
         logger.info(f"[ensure_connected] Need to connect...")
         if self._ws and not self._ws.closed:
             try:
@@ -220,7 +231,7 @@ class RemoteTTSHandler:
                     await self._receive_task
                 except asyncio.CancelledError:
                     pass
-        
+
         if self.auto_discover:
             result = await self.connect_with_discovery(pack_id)
             logger.info(f"[ensure_connected] connect_with_discovery returned: {result}")
@@ -230,11 +241,7 @@ class RemoteTTSHandler:
         return result
 
     async def synthesize(
-        self,
-        text: str,
-        emotion_config: dict,
-        params: dict,
-        pack_id: str
+        self, text: str, emotion_config: dict, params: dict, pack_id: str
     ) -> TTSResult:
         logger.info(f"Synthesize called: pack_id={pack_id}, text_len={len(text)}")
         if not await self.ensure_connected(pack_id):
@@ -255,7 +262,7 @@ class RemoteTTSHandler:
             "pack_id": pack_id,
             "text": text,
             "emotion_config": emotion_config,
-            "params": params
+            "params": params,
         }
 
         try:
@@ -275,29 +282,52 @@ class RemoteTTSHandler:
                     duration = 0.0
                     try:
                         import soundfile as sf
+
                         info = sf.info(str(output_path))
                         data, sr = sf.read(str(output_path), dtype="float32")
                         duration = len(data) / sr
-                        logger.info(f"Received audio: {len(audio_data)} bytes, duration: {duration:.2f}s, sr={sr}Hz, subtype={info.subtype}")
-                        
+                        logger.info(
+                            f"Received audio: {len(audio_data)} bytes, duration: {duration:.2f}s, sr={sr}Hz, subtype={info.subtype}"
+                        )
+
                         TARGET_SR = 44100
                         if info.subtype != "PCM_16" or sr != TARGET_SR:
                             pcm_path = str(output_path).replace(".wav", "_pcm16.wav")
-                            ffmpeg_exe = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
-                            ffmpeg_local = self.temp_dir.parent / "ffmpeg" / "bin" / ffmpeg_exe
-                            ffmpeg_cmd = str(ffmpeg_local) if ffmpeg_local.exists() else "ffmpeg"
-                            result_ffmpeg = subprocess.run([
-                                ffmpeg_cmd, "-y", "-i", str(output_path),
-                                "-ar", str(TARGET_SR),
-                                "-ac", "1",
-                                "-sample_fmt", "s16",
-                                pcm_path
-                            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                            logger.info(f"FFmpeg resample exit={result_ffmpeg.returncode}, {sr}Hz -> {TARGET_SR}Hz PCM_16 (cmd={ffmpeg_cmd})")
+                            ffmpeg_exe = (
+                                "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+                            )
+                            ffmpeg_local = (
+                                self.temp_dir.parent / "ffmpeg" / "bin" / ffmpeg_exe
+                            )
+                            ffmpeg_cmd = (
+                                str(ffmpeg_local) if ffmpeg_local.exists() else "ffmpeg"
+                            )
+                            result_ffmpeg = subprocess.run(
+                                [
+                                    ffmpeg_cmd,
+                                    "-y",
+                                    "-i",
+                                    str(output_path),
+                                    "-ar",
+                                    str(TARGET_SR),
+                                    "-ac",
+                                    "1",
+                                    "-sample_fmt",
+                                    "s16",
+                                    pcm_path,
+                                ],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                            )
+                            logger.info(
+                                f"FFmpeg resample exit={result_ffmpeg.returncode}, {sr}Hz -> {TARGET_SR}Hz PCM_16 (cmd={ffmpeg_cmd})"
+                            )
                             if result_ffmpeg.returncode == 0:
                                 output_path = Path(pcm_path)
                             else:
-                                logger.error(f"FFmpeg failed: {result_ffmpeg.stderr.decode('utf-8', errors='ignore')[-200:]}")
+                                logger.error(
+                                    f"FFmpeg failed: {result_ffmpeg.stderr.decode('utf-8', errors='ignore')[-200:]}"
+                                )
                     except Exception as e:
                         logger.error(f"Failed to process audio: {e}")
 
@@ -348,11 +378,3 @@ class RemoteTTSHandler:
 
         self._connected = False
         logger.info("Connection closed")
-
-    @property
-    def is_connected(self) -> bool:
-        return self._connected and self._ws is not None and not self._ws.closed
-
-    @property
-    def is_pack_valid(self) -> bool:
-        return self._pack_valid

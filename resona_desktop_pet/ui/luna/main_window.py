@@ -7,7 +7,7 @@ import threading
 import ctypes
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, Signal, QEvent, QPoint, QRect, QPropertyAnimation, QEasingCurve, QObject
-from PySide6.QtGui import QMouseEvent, QWheelEvent, QPixmap, QCursor, QGuiApplication, QAction, QActionGroup, QIcon, QPainter, QPaintEvent
+from PySide6.QtGui import QCursor, QGuiApplication, QAction, QActionGroup, QPainter, QPaintEvent
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QMenu, QGraphicsOpacityEffect, QApplication
 from resona_desktop_pet.config import ConfigManager
 if sys.platform == "win32":
@@ -314,17 +314,6 @@ class MainWindow(QWidget):
         self.set_emotion(emotion)
         self.io.show_output(text)
 
-    def show_response_with_timeout(self, text: str, emotion: str):
-        self.is_processing = False
-        self.is_displaying_text = True
-        self.thinking_timer.stop()
-        self.thinking_switch_timer.stop()
-        self.cancel_idle_fade()
-        self.show_response(text, emotion)
-        reading_time = self.config.base_display_time + (len(text) * self.config.text_read_speed)
-        reading_time = max(1.5, reading_time)
-        self.text_display_timer.start(int(reading_time * 1000))
-
     def show_behavior_response_with_timeout(self, text: str, emotion: str):
         self.is_processing = False
         self.is_displaying_text = True
@@ -348,9 +337,6 @@ class MainWindow(QWidget):
     def on_audio_complete(self):
         QTimer.singleShot(1500, self.finish_processing)
 
-    def reset_to_default(self):
-        self.finish_processing()
-        
     def sync_window_to_sprite(self):
         def do_resize():
             self.character.adjustSize()
@@ -462,12 +448,6 @@ class MainWindow(QWidget):
                 self.show()
                 self.raise_()
                 self._reinforce_topmost()
-
-    def _reapply_drag_drop(self):
-        self.setAcceptDrops(True)
-        self.setAttribute(Qt.WidgetAttribute.WA_DropSiteRegistered, True)
-        self.character.setAcceptDrops(True)
-        self.io.setAcceptDrops(True)
 
     def refresh_from_config(self):
         try:
@@ -740,13 +720,6 @@ class MainWindow(QWidget):
         self.cancel_idle_fade()
         self._apply_window_settings()
 
-    def _reset_stays_on_top(self):
-        if not self.manual_hidden and not self.config.always_on_top:
-            current_flags = self.windowFlags()
-            if current_flags & Qt.WindowType.WindowStaysOnTopHint:
-                self.setWindowFlags(current_flags & ~Qt.WindowType.WindowStaysOnTopHint)
-                self.show()
-
     def _update_visibility(self):
         controller = getattr(self, "controller", None)
         pack_switch_pending = bool(controller and getattr(controller, "_pack_switch_pending", False))
@@ -770,7 +743,7 @@ class MainWindow(QWidget):
         menu.addAction("Replay Last Response", self.replay_requested.emit)
         menu.addAction("Refresh Audio Devices", self.refresh_audio_requested.emit)
         menu.addSeparator()
-        settings_action = menu.addAction("Settings", self.settings_requested.emit)
+        menu.addAction("Settings", self.settings_requested.emit)
         menu.setStyleSheet("""
             QMenu {
                 background-color: rgba(40, 40, 40, 230);
@@ -947,7 +920,7 @@ class MainWindow(QWidget):
                 WS_EX_ACCEPT_FILES = 0x00000010
                 current_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
                 ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, current_style | WS_EX_ACCEPT_FILES)
-            except Exception as e:
+            except Exception:
                 pass
         if not hasattr(self, '_initial_position_set'):
             screen = QGuiApplication.primaryScreen().availableGeometry()

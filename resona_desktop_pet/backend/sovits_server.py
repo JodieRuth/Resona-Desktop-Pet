@@ -1,14 +1,12 @@
 import asyncio
 import json
 import base64
-import os
-import sys
 import socket
 import threading
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Set
-from dataclasses import dataclass, field
+from typing import Optional, Dict
+from dataclasses import dataclass
 
 import websockets
 

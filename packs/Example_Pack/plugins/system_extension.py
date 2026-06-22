@@ -1,6 +1,5 @@
 # D:\GitHub\Resona-Desktop-Pet\packs\Example_Pack\plugins\system_extension.py
 
-import os
 import subprocess
 import psutil
 import logging

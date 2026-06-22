@@ -1,12 +1,11 @@
 import json
 import os
 import sys
-import asyncio
 import aiohttp
 import traceback
 import logging
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional
 from dataclasses import dataclass
 from datetime import datetime
 from ..config import ConfigManager
@@ -286,17 +285,6 @@ Parameters: {json.dumps(payload, ensure_ascii=False, indent=2)}
             logger.error(f"[TTS] Synthesis failed: {e}")
             traceback.print_exc()
             return TTSResult(error=str(e))
-    async def synthesize_fallback(self, text: str, emotion: str = "<E:smile>") -> TTSResult:
-        emotion_config = self._get_emotion_config(emotion)
-        ref_wav_path = self.project_root / "gsv" / emotion_config["ref_wav"]
-        if ref_wav_path.exists():
-            return TTSResult(audio_path=str(ref_wav_path))
-        return TTSResult(error="No fallback")
-
-    async def close_remote(self):
-        if self._remote_handler:
-            await self._remote_handler.close()
-
     def cleanup(self) -> None:
         import shutil
         if os.path.exists(self._temp_dir): shutil.rmtree(self._temp_dir, ignore_errors=True)

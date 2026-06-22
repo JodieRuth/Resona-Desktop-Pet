@@ -6,7 +6,7 @@ import psutil
 import logging
 import ctypes.wintypes
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Optional
 from datetime import datetime
 from PySide6.QtCore import QThread, Signal
 
@@ -565,7 +565,6 @@ class BehaviorMonitor(QThread):
             
             GWL_EXSTYLE = -20
             WS_EX_TOOLWINDOW = 0x00000080
-            WS_EX_APPWINDOW = 0x00040000
             exstyle = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             
             if exstyle & WS_EX_TOOLWINDOW:

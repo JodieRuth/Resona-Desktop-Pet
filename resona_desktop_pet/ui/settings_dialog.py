@@ -1,7 +1,6 @@
 
 
 from pathlib import Path
-from typing import List
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -22,6 +21,8 @@ class SettingsDialog(QDialog):
         self.config = config
         self.project_root = Path(config.config_path).parent
         self.current_model_num = -1
+        self.current_model_section = ""
+        self.llm_sections = []
 
         self.setWindowTitle("Resona Desktop Pet - Settings")
         self.setMinimumSize(980, 900)
@@ -520,24 +521,9 @@ class SettingsDialog(QDialog):
         model_layout = self._make_form_layout(model_group)
 
         self.model_select_combo = QComboBox()
-        self.model_select_combo.addItems([
-            "1: OpenAI (ChatGPT)",
-            "2: DeepSeek",
-            "3: Claude (Anthropic)",
-            "4: Kimi (Moonshot)",
-            "5: Gemini (Google)",
-            "6: Grok (xAI)",
-            "7: Qwen (Aliyun)",
-            "8: GitHub Models",
-            "9: OpenAI Compatible",
-            "10: Zhipu (GLM)"
-        ])
+        self._populate_llm_model_combo()
         self.model_select_combo.currentIndexChanged.connect(self._on_model_changed)
-        model_layout.addRow("Provider (need restart):", self.model_select_combo)
-
-        self.llm_mode_combo = QComboBox()
-        self.llm_mode_combo.addItems(["cloud", "local"])
-        model_layout.addRow("Mode (need restart):", self.llm_mode_combo)
+        model_layout.addRow("Config Block (need restart):", self.model_select_combo)
 
         layout.addWidget(model_group)
 
@@ -551,6 +537,10 @@ class SettingsDialog(QDialog):
 
         self.base_url_edit = QLineEdit()
         api_layout.addRow("Base URL (need restart):", self.base_url_edit)
+
+        self.provider_edit = QLineEdit()
+        self.provider_edit.setPlaceholderText("e.g. openai, deepseek, anthropic")
+        api_layout.addRow("LiteLLM Provider (need restart):", self.provider_edit)
 
         self.model_name_edit = QLineEdit()
         api_layout.addRow("Model Name (need restart):", self.model_name_edit)
@@ -876,12 +866,7 @@ class SettingsDialog(QDialog):
         self.weather_enabled_check.setChecked(self.config.weather_enabled)
         self.weather_api_key_edit.setText(self.config.weather_api_key)
 
-
-        self.model_select_combo.blockSignals(True)
-        self.model_select_combo.setCurrentIndex(self.config.model_select - 1)
-        self.current_model_num = self.config.model_select
-        self.model_select_combo.blockSignals(False)
-        self.llm_mode_combo.setCurrentText(self.config.llm_mode)
+        self._populate_llm_model_combo()
         self._load_llm_config()
         self.prompt_source_combo.setCurrentText(self.config.prompt_source)
         self.prompt_file_edit.setText(self.config.prompt_file_path)
@@ -937,46 +922,78 @@ class SettingsDialog(QDialog):
         self.physics_ignore_borderless_check.setChecked(self.config.physics_ignore_borderless_fullscreen)
         self.physics_screen_padding_spin.setValue(self.config.physics_screen_padding)
 
+    def _format_llm_section_label(self, item: dict) -> str:
+        section = item["section"]
+        model_id = item["id"]
+        provider = self.config.get(section, "provider", "openai").strip()
+        model_name = self.config.get(section, "model_name", "").strip()
+        suffix = ""
+        if provider and model_name:
+            suffix = f" ({provider}/{model_name})"
+        elif provider:
+            suffix = f" ({provider})"
+        return f"{model_id}: {section}{suffix}"
+
+    def _populate_llm_model_combo(self):
+        self.llm_sections = self.config.get_llm_sections()
+        selected_id = self.config.model_select
+
+        self.model_select_combo.blockSignals(True)
+        self.model_select_combo.clear()
+
+        selected_index = 0
+        for index, item in enumerate(self.llm_sections):
+            self.model_select_combo.addItem(self._format_llm_section_label(item), item)
+            if item["id"] == selected_id:
+                selected_index = index
+
+        if self.llm_sections:
+            self.model_select_combo.setCurrentIndex(selected_index)
+            current = self.llm_sections[selected_index]
+            self.current_model_num = current["id"]
+            self.current_model_section = current["section"]
+        else:
+            self.model_select_combo.addItem("No Model_* section found", None)
+            self.current_model_num = -1
+            self.current_model_section = ""
+
+        self.model_select_combo.blockSignals(False)
+
     def _load_llm_config(self):
 
         llm_config = self.config.get_llm_config()
+        self.provider_edit.setText(llm_config.get("provider", "openai"))
         self.api_key_edit.setText(llm_config.get("api_key", ""))
         self.base_url_edit.setText(llm_config.get("base_url", ""))
         self.model_name_edit.setText(llm_config.get("model_name", ""))
 
     def _on_model_changed(self, index: int):
-        if self.current_model_num != -1:
-            self._save_current_llm_config(self.current_model_num)
+        if self.current_model_section:
+            self._save_llm_config_section(self.current_model_section)
 
-        self.current_model_num = index + 1
-        self.config.set("General", "model_select", str(index + 1))
+        item = self.model_select_combo.itemData(index)
+        if not item:
+            return
+        self.current_model_num = item["id"]
+        self.current_model_section = item["section"]
+        self.config.set("General", "model_select", str(item["id"]))
         self._load_llm_config()
 
     def _save_current_llm_config(self, model_num=None):
         if model_num is None:
-            model_num = self.model_select_combo.currentIndex() + 1
-        self.section_map = {
-            1: "Model_1_OpenAI",
-            2: "Model_2_DeepSeek",
-            3: "Model_3_Claude",
-            4: "Model_4_Kimi",
-            5: "Model_5_Gemini",
-            6: "Model_6_Grok",
-            7: "Model_7_Qwen",
-            8: "Model_8_GitHub",
-            9: "Model_9_OpenAI_Compatible",
-            10: "Model_10_Zhipu",
-        }
-        
-        if hasattr(self.config, 'config'):
-            for i in range(7, 11):
-                prefix = f"Model_{i}"
-                for section in self.config.config.sections():
-                    if section.startswith(prefix):
-                        self.section_map[i] = section
-                        break
-        section = self.section_map.get(model_num)
+            item = self.model_select_combo.currentData()
+            section = item["section"] if item else ""
+        else:
+            section = ""
+            for item in self.config.get_llm_sections():
+                if item["id"] == model_num:
+                    section = item["section"]
+                    break
+        self._save_llm_config_section(section)
+
+    def _save_llm_config_section(self, section: str):
         if section:
+            self.config.set(section, "provider", self.provider_edit.text().strip())
             self.config.set(section, "api_key", self.api_key_edit.text())
             self.config.set(section, "base_url", self.base_url_edit.text())
             self.config.set(section, "model_name", self.model_name_edit.text())
@@ -1063,8 +1080,9 @@ class SettingsDialog(QDialog):
             self.config.set("Weather", "enabled", str(self.weather_enabled_check.isChecked()).lower())
             self.config.set("Weather", "api_key", self.weather_api_key_edit.text())
 
-            self.config.set("General", "model_select", str(self.model_select_combo.currentIndex() + 1))
-            self.config.set("General", "llm_mode", self.llm_mode_combo.currentText())
+            item = self.model_select_combo.currentData()
+            if item:
+                self.config.set("General", "model_select", str(item["id"]))
             self._save_current_llm_config()
             self.config.set("Prompt", "source", self.prompt_source_combo.currentText())
             self.config.set("Prompt", "file_path", self.prompt_file_edit.text())

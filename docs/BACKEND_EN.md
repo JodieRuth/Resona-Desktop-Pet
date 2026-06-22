@@ -6,10 +6,7 @@ Located in `resona_desktop_pet/backend/`, these modules handle AI logic and audi
 Handles communication with various LLM APIs.
 - **Unified Calling**: Based on the `litellm` library for unified LLM API calls, supporting 100+ models.
 - **History Management**: The `ConversationHistory` class automatically maintains the last N rounds of dialogue.
-- **Multi-Model Adapters**:
-  - `query_openai_compatible`: Supports DeepSeek, GPT-4, LocalLLM, etc.
-  - `query_gemini`: Specifically adapted for Google Gemini's history format.
-  - `query_claude`: Supports Anthropic Claude.
+- **Multi-Model Support**: The `provider` field in each `[Model_N]` block controls the LiteLLM model prefix, and multiple copied model blocks can be used for switching.
 - **Thinking Process Support**: Extracts and logs `<think>` tag content from models like R1 and Claude.
 - **Automatic Parsing**: Robustly parses LLM JSON responses into `LLMResponse` objects (emotion, display text, TTS text).
 - **OCR Context (Optional)**: Provides screen text recognition and prompt injection for environmental awareness. Enabling this feature will send screen content to third-party OCR services, potentially including sensitive information. Users assume all risks associated with this feature.

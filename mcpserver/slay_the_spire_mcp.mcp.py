@@ -1235,7 +1235,6 @@ def sts_get_combat_summary(thinking: str = "") -> str:
     max_orbs = player.get("max_orbs", 0)
     if max_orbs > 0:
         orb_strs = []
-        active_orbs = [o for o in orbs if not _is_empty_orb(o)]
         for i in range(max_orbs):
             if i < len(orbs):
                 o = orbs[i]

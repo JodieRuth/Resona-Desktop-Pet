@@ -277,13 +277,5 @@ class SoVITSManager:
     def restart(self, timeout: int = 60) -> bool:
         self.stop(); time.sleep(2); return self.start(timeout)
     
-    def health_check(self) -> dict:
-        result = {"running": False, "responsive": False, "error": None}
-        if self.process and self.process.poll() is None: result["running"] = True
-        if self.is_running(): result["responsive"] = True
-        elif result["running"]: result["error"] = "Process running but not responsive"
-        else: result["error"] = "Process not running"
-        return result
-    
     def __del__(self):
         self.stop()

@@ -87,19 +87,6 @@ def setup_logging(
     return root_logger
 
 
-def get_logger(name: str) -> logging.Logger:
-    """
-    Get a named logger instance.
-
-    Args:
-        name: Logger name (e.g., 'LLM', 'TTS', 'Behavior')
-
-    Returns:
-        Logger instance
-    """
-    return logging.getLogger(name)
-
-
 # Convenience functions for quick logging
 def debug(msg: str, module: str = "App"):
     """Log debug message."""

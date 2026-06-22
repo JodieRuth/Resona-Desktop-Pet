@@ -1,9 +1,8 @@
 from pathlib import Path
-from typing import Optional, Callable
-from PySide6.QtCore import QSize, Qt
+from typing import Callable
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap, QAction
 from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QApplication
-from ..config import ConfigManager
 
 class TrayIcon(QSystemTrayIcon):
     def __init__(self, parent=None):
@@ -75,7 +74,3 @@ class TrayIcon(QSystemTrayIcon):
         action.triggered.connect(callback)
         self.contextMenu().insertAction(self.contextMenu().actions()[0], action)
         self.contextMenu().insertSeparator(self.contextMenu().actions()[1])
-
-    def show_message(self, title: str, message: str, icon_type=None):
-        if icon_type is None: icon_type = QSystemTrayIcon.MessageIcon.Information
-        self.showMessage(title, message, icon_type, 3000)

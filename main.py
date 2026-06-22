@@ -14,7 +14,7 @@ import time
 import random
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 from PySide6.QtCore import QObject, Signal, QTimer, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -31,7 +31,7 @@ else:
 from resona_desktop_pet.web_server import WebServerThread, session_manager, ClientSession
 from memory.memory_manager import MemoryManager
 from memory.startup_processor import StartupProcessor
-from resona_desktop_pet.utils.logger import setup_logging, get_logger
+from resona_desktop_pet.utils.logger import setup_logging
 
 def exception_hook(exctype, value, tb):
     traceback.print_exception(exctype, value, tb)
@@ -535,10 +535,6 @@ class ApplicationController(QObject):
             except Exception as e:
                 logger.error(f"[Main] MCP startup failed: {e}")
         
-        if hasattr(self.config, 'memory_enabled') and self.config.memory_enabled and self.config.memory_startup_processing:
-            logger.info("[Main] Scheduling startup memory processing...")
-            asyncio.run_coroutine_threadsafe(self._process_startup_memory(), self._loop)
-        
         self.audio_player = AudioPlayer(self)
         self.audio_player.playback_finished.connect(self._on_audio_finished)
         self.main_window = MainWindow(self.config)
@@ -708,7 +704,6 @@ class ApplicationController(QObject):
 
     def _add_debug_to_tray(self):
         try:
-            from resona_desktop_pet.ui.tray_icon import TrayIcon
             if hasattr(self, 'tray_icon'):
                 self.tray_icon.add_menu_action("Dev Control Panel", self.debug_panel.show)
         except Exception as e:
@@ -1266,7 +1261,6 @@ class ApplicationController(QObject):
         seconds_passed = int(adjusted_elapsed)
         if seconds_passed <= 0:
             return
-        expected_triggers = seconds_passed * probability
         if self._idle_trigger_count < min_triggers:
             if random.random() < probability or self._idle_trigger_count < seconds_passed * probability:
                 self._trigger_idle_question()
